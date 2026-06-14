@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 import LocalDictateCore
 import Speech
@@ -11,7 +10,6 @@ struct SpeechTranscript: Sendable {
 @MainActor
 protocol SpeechEngine: AnyObject {
     func availability(locale: Locale) async -> EngineAvailability
-    func transcribe(audioFileURL: URL, locale: Locale) async throws -> SpeechTranscript
 }
 
 enum SpeechEngineError: LocalizedError {
@@ -30,7 +28,7 @@ enum SpeechEngineError: LocalizedError {
         case .noLocalRecognizer:
             "The selected language does not currently support local-only recognition on this Mac."
         case .emptyTranscript:
-            "No speech was detected in the recording."
+            "No speech was detected in the live audio."
         case .recognitionFailed(let message):
             message
         }
@@ -44,77 +42,15 @@ final class AppleSpeechEngine: SpeechEngine {
             return EngineAvailability(state: .permissionNeeded, detail: "Speech Recognition permission has not been granted.")
         }
 
-        if #available(macOS 26.0, *) {
-            let equivalent = await DictationTranscriber.supportedLocale(equivalentTo: locale)
-            if let equivalent {
-                let transcriber = DictationTranscriber(locale: equivalent, preset: .progressiveLongDictation)
-                let status = await AssetInventory.status(forModules: [transcriber])
-                switch status {
-                case .installed:
-                    return EngineAvailability(state: .available, detail: "Modern local dictation assets are installed for \(equivalent.identifier).")
-                case .downloading:
-                    return EngineAvailability(state: .downloading, detail: "Modern dictation assets are downloading for \(equivalent.identifier).")
-                case .supported:
-                    return EngineAvailability(state: .available, detail: "Modern dictation is supported for \(equivalent.identifier); assets may install on demand.")
-                case .unsupported:
-                    break
-                @unknown default:
-                    break
-                }
-            }
-        }
-
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
             return EngineAvailability(state: .unsupported, detail: "No Apple speech recognizer is available for \(locale.identifier).")
         }
         guard recognizer.isAvailable else {
             return EngineAvailability(state: .unavailable, detail: "Apple speech recognition is currently unavailable.")
         }
-        return EngineAvailability(state: .available, detail: "Using local-only Apple speech recognition for \(locale.identifier).")
-    }
-
-    func transcribe(audioFileURL: URL, locale: Locale) async throws -> SpeechTranscript {
-        guard PermissionService.speechState() == .granted else {
-            throw SpeechEngineError.permissionNeeded
+        guard recognizer.supportsOnDeviceRecognition else {
+            return EngineAvailability(state: .unsupported, detail: "Local-only Apple speech recognition is not available for \(locale.identifier).")
         }
-        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
-            throw SpeechEngineError.recognizerUnavailable
-        }
-
-        let request = SFSpeechURLRecognitionRequest(url: audioFileURL)
-        request.requiresOnDeviceRecognition = true
-        request.shouldReportPartialResults = false
-        if #available(macOS 13.0, *) {
-            request.addsPunctuation = true
-        }
-
-        let text = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            var didResume = false
-            let task = recognizer.recognitionTask(with: request) { result, error in
-                if let error, !didResume {
-                    didResume = true
-                    continuation.resume(throwing: SpeechEngineError.recognitionFailed(error.localizedDescription))
-                    return
-                }
-                guard let result, result.isFinal, !didResume else {
-                    return
-                }
-                didResume = true
-                continuation.resume(returning: result.bestTranscription.formattedString)
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
-                guard !didResume else { return }
-                didResume = true
-                task.cancel()
-                continuation.resume(throwing: SpeechEngineError.recognitionFailed("Timed out waiting for local speech recognition."))
-            }
-        }
-
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw SpeechEngineError.emptyTranscript
-        }
-        return SpeechTranscript(text: trimmed, languageIdentifier: locale.identifier)
+        return EngineAvailability(state: .available, detail: "Using live local Apple speech recognition for \(locale.identifier).")
     }
 }

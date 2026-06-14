@@ -9,8 +9,15 @@ final class LocalDictateModel: ObservableObject {
     @Published var cleanupAvailability: EngineAvailability = .unknown
     @Published var liveTranscript = ""
     @Published var cleanedText = ""
+    @Published var speechDebugEvents: [SpeechRecognitionDebugEvent] = []
     @Published var latestError: String?
     @Published var activeAudioURL: URL?
+    @Published var lastAudioDiagnostics: AudioRecordingDiagnostics?
+    @Published var audioInputDevices: [AudioInputDeviceChoice] = [.systemDefault]
+    @Published var selectedSidebarSection: SidebarSection? = .history
+    @Published var hotkeyDescription = "⌘D"
+    @Published var hotkeyError: String?
+    @Published var permissionNotice: String?
     @Published var selectedTemplateID: UUID {
         didSet { defaults.set(selectedTemplateID.uuidString, forKey: DefaultsKey.selectedTemplateID) }
     }
@@ -19,6 +26,12 @@ final class LocalDictateModel: ObservableObject {
     }
     @Published var audioRetention: AudioRetention {
         didSet { defaults.set(audioRetention.rawValue, forKey: DefaultsKey.audioRetention) }
+    }
+    @Published var selectedAudioInputDeviceID: String {
+        didSet {
+            defaults.set(selectedAudioInputDeviceID, forKey: DefaultsKey.selectedAudioInputDeviceID)
+            refreshAudioInputDevices()
+        }
     }
     @Published var selectedLocaleIdentifier: String {
         didSet { defaults.set(selectedLocaleIdentifier, forKey: DefaultsKey.selectedLocaleIdentifier) }
@@ -32,6 +45,7 @@ final class LocalDictateModel: ObservableObject {
     private let speechEngine: SpeechEngine = AppleSpeechEngine()
     private let cleanupService: CleanupService = FoundationModelCleanupService()
     private let insertionService = InsertionService()
+    private let hotkeyService = HotkeyService()
     private let defaults: UserDefaults
 
     var selectedTemplate: CleanupTemplate {
@@ -47,15 +61,18 @@ final class LocalDictateModel: ObservableObject {
         let templateString = defaults.string(forKey: DefaultsKey.selectedTemplateID)
         selectedTemplateID = templateString.flatMap(UUID.init(uuidString:)) ?? CleanupTemplate.cleanDictationID
         let insertionString = defaults.string(forKey: DefaultsKey.insertionMode)
-        insertionMode = insertionString.flatMap(InsertionMode.init(rawValue:)) ?? .copyOnly
+        insertionMode = insertionString.flatMap(InsertionMode.init(rawValue:)) ?? .autoPaste
         let retentionString = defaults.string(forKey: DefaultsKey.audioRetention)
         audioRetention = retentionString.flatMap(AudioRetention.init(rawValue:)) ?? .off
+        selectedAudioInputDeviceID = defaults.string(forKey: DefaultsKey.selectedAudioInputDeviceID) ?? AudioInputDeviceChoice.systemDefaultID
         selectedLocaleIdentifier = defaults.string(forKey: DefaultsKey.selectedLocaleIdentifier) ?? Locale.current.identifier
+        audioInputDevices = AudioInputDeviceService.choices(selectedID: selectedAudioInputDeviceID)
     }
 
     func launch() {
         historyStore.load()
         templateStore.load()
+        registerGlobalHotkey()
         Task {
             await refreshSystemState()
         }
@@ -63,21 +80,42 @@ final class LocalDictateModel: ObservableObject {
 
     func refreshSystemState() async {
         permissions = PermissionService.snapshot()
+        refreshAudioInputDevices()
         speechAvailability = await speechEngine.availability(locale: selectedLocale)
         cleanupAvailability = cleanupService.availability()
     }
 
-    func requestCorePermissions() {
+    func refreshAudioInputDevices() {
+        audioInputDevices = AudioInputDeviceService.choices(selectedID: selectedAudioInputDeviceID)
+    }
+
+    func requestMicrophonePermission() {
         Task {
             _ = await PermissionService.requestMicrophone()
+            permissionNotice = nil
+            await refreshSystemState()
+        }
+    }
+
+    func requestSpeechPermission() {
+        Task {
             _ = await PermissionService.requestSpeech()
+            permissionNotice = nil
             await refreshSystemState()
         }
     }
 
     func requestAccessibility() {
-        _ = PermissionService.requestAccessibilityPrompt()
+        let state = PermissionService.requestAccessibilityPrompt()
         permissions = PermissionService.snapshot()
+
+        guard state != .granted else {
+            permissionNotice = nil
+            return
+        }
+
+        permissionNotice = "Enable LocalDictate in Privacy & Security > Accessibility, then return here and refresh."
+        PermissionService.openAccessibilitySettings()
     }
 
     func toggleRecording() {
@@ -88,10 +126,23 @@ final class LocalDictateModel: ObservableObject {
         }
     }
 
+    func registerGlobalHotkey() {
+        do {
+            try hotkeyService.registerCommandD { [weak self] in
+                self?.toggleRecording()
+            }
+            hotkeyDescription = "⌘D"
+            hotkeyError = nil
+        } catch {
+            hotkeyError = error.localizedDescription
+        }
+    }
+
     func startRecording() {
         latestError = nil
         liveTranscript = ""
         cleanedText = ""
+        speechDebugEvents.removeAll()
 
         guard PermissionService.microphoneState() == .granted else {
             status = .error
@@ -100,7 +151,15 @@ final class LocalDictateModel: ObservableObject {
         }
 
         do {
-            activeAudioURL = try recorder.startRecording()
+            activeAudioURL = try recorder.startRecording(
+                inputDeviceID: selectedAudioInputDeviceID,
+                locale: selectedLocale,
+                retainAudio: audioRetention == .manualDelete
+            ) { [weak self] text in
+                self?.liveTranscript = text
+            } onDebugEvent: { [weak self] event in
+                self?.appendSpeechDebugEvent(event)
+            }
             status = .listening
         } catch {
             status = .error
@@ -110,14 +169,34 @@ final class LocalDictateModel: ObservableObject {
 
     func stopRecording() {
         guard status == .listening else { return }
-        guard let url = recorder.stopRecording() else {
-            status = .error
-            latestError = "No active recording was found."
-            return
-        }
-        activeAudioURL = url
+        status = .transcribing
         Task {
-            await processRecording(url)
+            do {
+                guard let recording = try await recorder.stopRecording() else {
+                    status = .error
+                    latestError = "No active recording was found."
+                    return
+                }
+
+                activeAudioURL = recording.url
+                lastAudioDiagnostics = recording.diagnostics
+
+                if let writeError = recording.diagnostics.writeErrorDescription {
+                    latestError = "Audio was transcribed, but saving the optional audio copy failed: \(writeError)"
+                }
+
+                guard !recording.diagnostics.isProbablySilent else {
+                    status = .error
+                    latestError = "The recording appears silent (\(recording.diagnostics.summary)). Check the Mac input device and microphone level."
+                    return
+                }
+
+                await processRecording(recording)
+            } catch {
+                status = .error
+                latestError = error.localizedDescription
+                await refreshSystemState()
+            }
         }
     }
 
@@ -129,11 +208,7 @@ final class LocalDictateModel: ObservableObject {
 
     func insertLatest() {
         do {
-            let didPaste = try insertionService.insertOrCopy(cleanedText, mode: insertionMode)
-            status = didPaste ? .inserted : .ready
-            if !didPaste {
-                latestError = "Copied text. Enable Accessibility permission for automatic paste."
-            }
+            applyInsertionResult(try insertionService.insertOrCopy(cleanedText, mode: insertionMode))
         } catch {
             latestError = error.localizedDescription
             status = .error
@@ -155,18 +230,17 @@ final class LocalDictateModel: ObservableObject {
         }
     }
 
-    private func processRecording(_ url: URL) async {
+    private func processRecording(_ recording: AudioRecordingResult) async {
         do {
-            status = .transcribing
-            let transcript = try await speechEngine.transcribe(audioFileURL: url, locale: selectedLocale)
+            let transcript = recording.transcript
             liveTranscript = transcript.text
 
             status = .cleaning
             let cleaned = try await cleanupService.clean(text: transcript.text, template: selectedTemplate)
             cleanedText = cleaned
 
-            let shouldKeepAudio = audioRetention == .manualDelete
-            if !shouldKeepAudio {
+            let shouldKeepAudio = audioRetention == .manualDelete && recording.url != nil
+            if !shouldKeepAudio, let url = recording.url {
                 try? FileManager.default.removeItem(at: url)
             }
             let record = DictationRecord(
@@ -176,10 +250,10 @@ final class LocalDictateModel: ObservableObject {
                 templateID: selectedTemplate.id,
                 templateName: selectedTemplate.name,
                 languageIdentifier: transcript.languageIdentifier,
-                audioFileName: shouldKeepAudio ? url.lastPathComponent : nil
+                audioFileName: shouldKeepAudio ? recording.url?.lastPathComponent : nil
             )
             historyStore.add(record)
-            status = .ready
+            applyInsertionResult(try insertionService.insertOrCopy(cleaned, mode: insertionMode))
         } catch {
             status = .error
             latestError = error.localizedDescription
@@ -187,11 +261,35 @@ final class LocalDictateModel: ObservableObject {
 
         await refreshSystemState()
     }
+
+    private func applyInsertionResult(_ result: InsertionResult) {
+        switch result {
+        case .empty:
+            status = .ready
+        case .copied:
+            latestError = nil
+            status = .ready
+        case .pasted:
+            latestError = nil
+            status = .inserted
+        case .copiedAccessibilityMissing:
+            latestError = "Copied text. Enable Accessibility permission for automatic paste, then refresh Privacy."
+            status = .ready
+        }
+    }
+
+    private func appendSpeechDebugEvent(_ event: SpeechRecognitionDebugEvent) {
+        speechDebugEvents.insert(event, at: 0)
+        if speechDebugEvents.count > 80 {
+            speechDebugEvents.removeLast(speechDebugEvents.count - 80)
+        }
+    }
 }
 
 private enum DefaultsKey {
     static let selectedTemplateID = "selectedTemplateID"
     static let insertionMode = "insertionMode"
     static let audioRetention = "audioRetention"
+    static let selectedAudioInputDeviceID = "selectedAudioInputDeviceID"
     static let selectedLocaleIdentifier = "selectedLocaleIdentifier"
 }

@@ -61,21 +61,55 @@ final class FoundationModelCleanupService: CleanupService {
         }
 
         let instructions = """
-        You are LocalDictate's local cleanup engine. Follow the user's selected template exactly. Do not add explanations, headings, Markdown fences, or commentary.
+        You are LocalDictate's local cleanup engine. Follow the user's selected template exactly.
+
+        Output contract:
+        - Return exactly one thing: the cleaned dictation text.
+        - Do not add explanations, labels, headings, Markdown fences, quotes, or commentary.
+        - Do not prefix the response with "Transcript:", "Cleaned Text:", "Output:", "Result:", or similar labels.
+        - The user's dictation will be wrapped in <dictation> tags. Never include those tags in your response.
 
         Template:
         \(template.prompt)
         """
         let session = LanguageModelSession(model: model, instructions: instructions)
         let prompt = """
-        Transcript:
+        <dictation>
         \(trimmed)
+        </dictation>
         """
         let response = try await session.respond(
             to: prompt,
             options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 1_200)
         )
-        let cleaned = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = Self.stripLeadingOutputLabels(from: response.content)
         return cleaned.isEmpty ? trimmed : cleaned
+    }
+
+    private static func stripLeadingOutputLabels(from text: String) -> String {
+        var output = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let labels = [
+            "Here is the cleaned text",
+            "Here is the cleaned transcript",
+            "Cleaned Transcript",
+            "Cleaned Text",
+            "Transcript",
+            "Output",
+            "Result"
+        ]
+
+        for label in labels {
+            if output.range(of: label, options: [.anchored, .caseInsensitive]) != nil {
+                output = trimLeadingLabelSeparator(String(output.dropFirst(label.count)))
+                break
+            }
+        }
+
+        return output
+    }
+
+    private static func trimLeadingLabelSeparator(_ text: String) -> String {
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ":：-–—"))
+        return text.trimmingCharacters(in: separators)
     }
 }

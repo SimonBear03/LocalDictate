@@ -2,11 +2,18 @@ import AppKit
 import ApplicationServices
 import LocalDictateCore
 
+enum InsertionResult: Sendable {
+    case empty
+    case copied
+    case pasted
+    case copiedAccessibilityMissing
+}
+
 final class InsertionService {
-    func insertOrCopy(_ text: String, mode: InsertionMode) throws -> Bool {
+    func insertOrCopy(_ text: String, mode: InsertionMode) throws -> InsertionResult {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return false
+            return .empty
         }
 
         let pasteboard = NSPasteboard.general
@@ -14,8 +21,12 @@ final class InsertionService {
         pasteboard.clearContents()
         pasteboard.setString(trimmed, forType: .string)
 
-        guard mode == .autoPaste, AXIsProcessTrusted() else {
-            return false
+        guard mode == .autoPaste else {
+            return .copied
+        }
+
+        guard AXIsProcessTrusted() else {
+            return .copiedAccessibilityMissing
         }
 
         postCommandV()
@@ -26,7 +37,7 @@ final class InsertionService {
                 pasteboard.setString(previousString, forType: .string)
             }
         }
-        return true
+        return .pasted
     }
 
     private func postCommandV() {
@@ -40,4 +51,3 @@ final class InsertionService {
         keyUp?.post(tap: .cghidEventTap)
     }
 }
-

@@ -11,14 +11,19 @@ struct LocalDictateApp: App {
         MenuBarExtra {
             MenuBarContentView()
                 .environmentObject(model)
+                .tint(.blue)
+                .accentColor(.blue)
         } label: {
             Label(model.status.title, systemImage: model.status.systemImage)
         }
         .menuBarExtraStyle(.window)
 
-        WindowGroup("LocalDictate", id: WindowID.main.rawValue) {
+        Window("LocalDictate", id: WindowID.main.rawValue) {
             MainWindowView()
                 .environmentObject(model)
+                .tint(.blue)
+                .accentColor(.blue)
+                .configuredAppWindowAppearance()
                 .frame(minWidth: 880, minHeight: 580)
                 .task {
                     model.launch()
@@ -30,17 +35,8 @@ struct LocalDictateApp: App {
                 Button(model.status == .listening ? "Stop Recording" : "Start Recording") {
                     model.toggleRecording()
                 }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keyboardShortcut("d", modifiers: [.command])
             }
-        }
-
-        Settings {
-            SettingsView()
-                .environmentObject(model)
-                .frame(width: 520)
-                .task {
-                    model.launch()
-                }
         }
     }
 }
@@ -49,9 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        WindowFocusService.activateApp()
+        return true
+    }
 }
 
 enum WindowID: String {
     case main
 }
-

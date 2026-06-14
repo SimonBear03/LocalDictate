@@ -25,6 +25,7 @@ struct TemplatesView: View {
                 .tag(template.id)
             }
             .frame(minWidth: 260, idealWidth: 320)
+            .systemSidebarSurface()
 
             if let selectedTemplate {
                 VStack(alignment: .leading, spacing: 16) {
@@ -44,26 +45,34 @@ struct TemplatesView: View {
 
                     Text("Prompt")
                         .font(.headline)
-                    TextEditor(text: .constant(selectedTemplate.prompt))
-                        .font(.body.monospaced())
-                        .textSelection(.enabled)
+                    ScrollView {
+                        Text(selectedTemplate.prompt)
+                            .font(.body.monospaced())
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    }
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(.quaternary)
+                    )
                         .frame(minHeight: 260)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(.quaternary)
-                        )
 
-                    Text("Built-in templates are read-only in this first pass. Custom template editing is the next feature surface.")
+                    Text("The default cleanup prompt is read-only in this first pass. It is intentionally conservative and avoids rewriting your wording.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
                 .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .systemWindowSurface()
             } else {
                 ContentUnavailableView("No Templates", systemImage: "text.badge.star")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .systemWindowSurface()
             }
         }
+        .systemWindowSurface()
         .navigationTitle("Templates")
     }
 }
-

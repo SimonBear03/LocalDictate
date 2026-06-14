@@ -14,9 +14,8 @@ final class TemplateStore: ObservableObject {
                 save()
                 return
             }
-            let data = try Data(contentsOf: url)
-            let decoded = try JSONDecoder.localDictate.decode([CleanupTemplate].self, from: data)
-            templates = mergeBuiltIns(with: decoded)
+            templates = CleanupTemplate.builtIns
+            save()
             loadError = nil
         } catch {
             templates = CleanupTemplate.builtIns
@@ -29,25 +28,8 @@ final class TemplateStore: ObservableObject {
     }
 
     func upsert(_ template: CleanupTemplate) {
-        if let index = templates.firstIndex(where: { $0.id == template.id }) {
-            templates[index] = template
-        } else {
-            templates.append(template)
-        }
+        templates = [template]
         save()
-    }
-
-    private func mergeBuiltIns(with decoded: [CleanupTemplate]) -> [CleanupTemplate] {
-        var byID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
-        for builtIn in CleanupTemplate.builtIns {
-            byID[builtIn.id] = builtIn
-        }
-        return byID.values.sorted {
-            if $0.isBuiltIn != $1.isBuiltIn {
-                return $0.isBuiltIn && !$1.isBuiltIn
-            }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
     }
 
     private func save() {
@@ -61,4 +43,3 @@ final class TemplateStore: ObservableObject {
         }
     }
 }
-

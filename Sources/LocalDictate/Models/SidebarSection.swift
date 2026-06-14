@@ -3,6 +3,7 @@ import SwiftUI
 enum SidebarSection: String, CaseIterable, Identifiable {
     case history
     case templates
+    case settings
     case privacy
     case diagnostics
 
@@ -12,6 +13,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         switch self {
         case .history: "History"
         case .templates: "Templates"
+        case .settings: "Settings"
         case .privacy: "Privacy"
         case .diagnostics: "Diagnostics"
         }
@@ -21,9 +23,9 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         switch self {
         case .history: "clock"
         case .templates: "text.badge.star"
+        case .settings: "gearshape"
         case .privacy: "hand.raised"
         case .diagnostics: "stethoscope"
         }
     }
 }
-

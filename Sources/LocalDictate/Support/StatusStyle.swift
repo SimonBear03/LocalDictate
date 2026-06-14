@@ -18,11 +18,11 @@ extension DictationStatus {
         switch self {
         case .idle: .secondary
         case .listening: .red
-        case .transcribing: .blue
-        case .cleaning: .purple
+        case .transcribing: .secondary
+        case .cleaning: .secondary
         case .ready: .green
-        case .inserted: .teal
-        case .error: .orange
+        case .inserted: .green
+        case .error: .red
         }
     }
 }
@@ -42,11 +42,10 @@ extension EngineState {
     var tint: Color {
         switch self {
         case .available: .green
-        case .downloading: .blue
+        case .downloading: .secondary
         case .permissionNeeded: .orange
         case .unavailable, .unsupported: .red
         case .unknown: .secondary
         }
     }
 }
-

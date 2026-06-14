@@ -1,5 +1,6 @@
 import AVFoundation
 import ApplicationServices
+import AppKit
 import LocalDictateCore
 import Speech
 
@@ -58,11 +59,22 @@ enum PermissionService {
     }
 
     static func accessibilityState() -> PermissionState {
-        AXIsProcessTrusted() ? .granted : .notDetermined
+        AXIsProcessTrusted() ? .granted : .denied
     }
 
+    @MainActor
     static func requestAccessibilityPrompt() -> PermissionState {
-        let promptKey = "AXTrustedCheckOptionPrompt"
-        return AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary) ? .granted : accessibilityState()
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options) ? .granted : accessibilityState()
+    }
+
+    @MainActor
+    static func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+            return
+        }
+
+        NSWorkspace.shared.open(url)
     }
 }

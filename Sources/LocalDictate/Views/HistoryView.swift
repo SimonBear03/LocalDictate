@@ -25,6 +25,7 @@ struct HistoryView: View {
                 .tag(record.id)
             }
             .frame(minWidth: 280, idealWidth: 330)
+            .systemSidebarSurface()
 
             Group {
                 if let selectedRecord {
@@ -36,7 +37,9 @@ struct HistoryView: View {
                 }
             }
             .frame(minWidth: 420)
+            .systemWindowSurface()
         }
+        .systemWindowSurface()
         .navigationTitle("History")
         .toolbar {
             ToolbarItem {
@@ -72,6 +75,7 @@ private struct HistoryDetailView: View {
             }
             .padding(24)
         }
+        .systemWindowSurface()
     }
 }
 
@@ -80,15 +84,9 @@ private struct TextSection: View {
     var text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
+        GroupBox(title) {
             Text(text.isEmpty ? "No text" : text)
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }
-
