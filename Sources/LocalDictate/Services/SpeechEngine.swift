@@ -42,6 +42,54 @@ final class AppleSpeechEngine: SpeechEngine {
             return EngineAvailability(state: .permissionNeeded, detail: "Speech Recognition permission has not been granted.")
         }
 
+        if #available(macOS 26.0, *) {
+            if let analyzerAvailability = await analyzerAvailability(locale: locale) {
+                return analyzerAvailability
+            }
+        }
+
+        return legacyAvailability(locale: locale)
+    }
+
+    @available(macOS 26.0, *)
+    private func analyzerAvailability(locale: Locale) async -> EngineAvailability? {
+        guard let supportedLocale = await DictationTranscriber.supportedLocale(equivalentTo: locale) else {
+            return nil
+        }
+
+        let transcriber = DictationTranscriber(
+            locale: supportedLocale,
+            contentHints: [],
+            transcriptionOptions: [.punctuation],
+            reportingOptions: [.volatileResults, .frequentFinalization],
+            attributeOptions: [.audioTimeRange, .transcriptionConfidence]
+        )
+        let status = await AssetInventory.status(forModules: [transcriber])
+
+        switch status {
+        case .installed:
+            return EngineAvailability(
+                state: .available,
+                detail: "Using local Apple DictationTranscriber with SpeechAnalyzer for \(supportedLocale.identifier)."
+            )
+        case .supported:
+            return EngineAvailability(
+                state: .available,
+                detail: "Apple DictationTranscriber supports \(supportedLocale.identifier); local assets may install on first use."
+            )
+        case .downloading:
+            return EngineAvailability(
+                state: .downloading,
+                detail: "Apple local dictation assets for \(supportedLocale.identifier) are downloading."
+            )
+        case .unsupported:
+            return nil
+        @unknown default:
+            return nil
+        }
+    }
+
+    private func legacyAvailability(locale: Locale) -> EngineAvailability {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
             return EngineAvailability(state: .unsupported, detail: "No Apple speech recognizer is available for \(locale.identifier).")
         }
@@ -51,6 +99,6 @@ final class AppleSpeechEngine: SpeechEngine {
         guard recognizer.supportsOnDeviceRecognition else {
             return EngineAvailability(state: .unsupported, detail: "Local-only Apple speech recognition is not available for \(locale.identifier).")
         }
-        return EngineAvailability(state: .available, detail: "Using live local Apple speech recognition for \(locale.identifier).")
+        return EngineAvailability(state: .available, detail: "Using legacy local Apple speech recognition for \(locale.identifier).")
     }
 }

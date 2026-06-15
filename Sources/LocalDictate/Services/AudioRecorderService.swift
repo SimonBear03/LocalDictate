@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMedia
 import LocalDictateCore
 import OSLog
 import Speech
@@ -15,6 +16,8 @@ final class AudioRecorderService: NSObject, AVCaptureAudioDataOutputSampleBuffer
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionState: LiveRecognitionState?
+    private var analyzerSession: AnyObject?
+    private var preferredCaptureAudioSettings: [String: Any]?
     private var meter = AudioLevelMeter()
     private var startedAt: Date?
     private var activeInputName = "Unknown"
@@ -31,11 +34,113 @@ final class AudioRecorderService: NSObject, AVCaptureAudioDataOutputSampleBuffer
         retainAudio: Bool,
         onPartialTranscript: @escaping @MainActor @Sendable (String) -> Void,
         onDebugEvent: @escaping @MainActor @Sendable (SpeechRecognitionDebugEvent) -> Void
-    ) throws -> URL? {
+    ) async throws -> URL? {
         guard PermissionService.speechState() == .granted else {
             throw SpeechEngineError.permissionNeeded
         }
 
+        cleanup(removeActiveAudio: true)
+
+        startedAt = Date()
+
+        do {
+            if #available(macOS 26.0, *) {
+                do {
+                    analyzerSession = try await AnalyzerRecognitionSession.start(
+                        locale: locale,
+                        onPartialTranscript: onPartialTranscript,
+                        onDebugEvent: onDebugEvent
+                    )
+                    preferredCaptureAudioSettings = (analyzerSession as? AnalyzerRecognitionSession)?.captureAudioSettings
+                } catch {
+                    speechRecognitionLogger.warning("SpeechAnalyzer setup failed, falling back to SFSpeechRecognizer: \(error.localizedDescription, privacy: .public)")
+                    try startLegacyRecognition(
+                        locale: locale,
+                        onPartialTranscript: onPartialTranscript,
+                        onDebugEvent: onDebugEvent
+                    )
+                }
+            } else {
+                try startLegacyRecognition(
+                    locale: locale,
+                    onPartialTranscript: onPartialTranscript,
+                    onDebugEvent: onDebugEvent
+                )
+            }
+
+            try startMicrophoneCapture(inputDeviceID: inputDeviceID)
+        } catch {
+            recognitionTask?.cancel()
+            if #available(macOS 26.0, *), let analyzerSession = analyzerSession as? AnalyzerRecognitionSession {
+                analyzerSession.cancel()
+            }
+            cleanup(removeActiveAudio: true)
+            throw error
+        }
+
+        return activeRecordingURL
+    }
+
+    @MainActor
+    func stopRecording() async throws -> AudioRecordingResult? {
+        if #available(macOS 26.0, *), let analyzerSession = analyzerSession as? AnalyzerRecognitionSession {
+            let stoppedAt = Date()
+            stopAudioCapture()
+            try analyzerSession.finishAudio()
+            let transcript = try await analyzerSession.waitForFinal(timeout: 12)
+            let diagnostics = diagnostics(stoppedAt: stoppedAt)
+            let url = activeRecordingURL
+            cleanup(removeActiveAudio: false)
+
+            return AudioRecordingResult(transcript: transcript, url: url, diagnostics: diagnostics)
+        }
+
+        guard let request = recognitionRequest, let state = recognitionState else {
+            return nil
+        }
+
+        let stoppedAt = Date()
+        stopAudioCapture()
+        state.markAudioEnded()
+        request.endAudio()
+        recognitionTask?.finish()
+
+        let transcript = try await state.waitForFinal(timeout: 12)
+        let diagnostics = diagnostics(stoppedAt: stoppedAt)
+        let url = activeRecordingURL
+        cleanup(removeActiveAudio: false)
+
+        return AudioRecordingResult(transcript: transcript, url: url, diagnostics: diagnostics)
+    }
+
+    @MainActor
+    func discardActiveRecording() {
+        recognitionTask?.cancel()
+        if #available(macOS 26.0, *), let analyzerSession = analyzerSession as? AnalyzerRecognitionSession {
+            analyzerSession.cancel()
+        }
+        stopAudioCapture()
+        cleanup(removeActiveAudio: true)
+    }
+
+    nonisolated func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        meter.record(sampleBuffer: sampleBuffer)
+        if #available(macOS 26.0, *), let analyzerSession = analyzerSession as? AnalyzerRecognitionSession {
+            analyzerSession.append(sampleBuffer: sampleBuffer)
+        } else {
+            recognitionRequest?.appendAudioSampleBuffer(sampleBuffer)
+        }
+    }
+
+    private func startLegacyRecognition(
+        locale: Locale,
+        onPartialTranscript: @escaping @MainActor @Sendable (String) -> Void,
+        onDebugEvent: @escaping @MainActor @Sendable (SpeechRecognitionDebugEvent) -> Void
+    ) throws {
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
             throw SpeechEngineError.recognizerUnavailable
         }
@@ -43,8 +148,6 @@ final class AudioRecorderService: NSObject, AVCaptureAudioDataOutputSampleBuffer
         guard recognizer.supportsOnDeviceRecognition else {
             throw SpeechEngineError.noLocalRecognizer
         }
-
-        cleanup(removeActiveAudio: true)
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
@@ -67,53 +170,6 @@ final class AudioRecorderService: NSObject, AVCaptureAudioDataOutputSampleBuffer
         recognitionRequest = request
         recognitionTask = task
         recognitionState = state
-        startedAt = Date()
-
-        do {
-            try startMicrophoneCapture(inputDeviceID: inputDeviceID)
-        } catch {
-            task.cancel()
-            cleanup(removeActiveAudio: true)
-            throw error
-        }
-
-        return activeRecordingURL
-    }
-
-    @MainActor
-    func stopRecording() async throws -> AudioRecordingResult? {
-        guard let request = recognitionRequest, let state = recognitionState else {
-            return nil
-        }
-
-        let stoppedAt = Date()
-        stopAudioCapture()
-        state.markAudioEnded()
-        request.endAudio()
-        recognitionTask?.finish()
-
-        let transcript = try await state.waitForFinal(timeout: 12)
-        let diagnostics = diagnostics(stoppedAt: stoppedAt)
-        let url = activeRecordingURL
-        cleanup(removeActiveAudio: false)
-
-        return AudioRecordingResult(transcript: transcript, url: url, diagnostics: diagnostics)
-    }
-
-    @MainActor
-    func discardActiveRecording() {
-        recognitionTask?.cancel()
-        stopAudioCapture()
-        cleanup(removeActiveAudio: true)
-    }
-
-    nonisolated func captureOutput(
-        _ output: AVCaptureOutput,
-        didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
-    ) {
-        meter.record(sampleBuffer: sampleBuffer)
-        recognitionRequest?.appendAudioSampleBuffer(sampleBuffer)
     }
 
     private func startMicrophoneCapture(inputDeviceID: String) throws {
@@ -124,6 +180,9 @@ final class AudioRecorderService: NSObject, AVCaptureAudioDataOutputSampleBuffer
         let session = AVCaptureSession()
         let input = try AVCaptureDeviceInput(device: device)
         let output = AVCaptureAudioDataOutput()
+        if let preferredCaptureAudioSettings {
+            output.audioSettings = preferredCaptureAudioSettings
+        }
 
         session.beginConfiguration()
         guard session.canAddInput(input) else {
@@ -164,6 +223,11 @@ final class AudioRecorderService: NSObject, AVCaptureAudioDataOutputSampleBuffer
         recognitionRequest = nil
         recognitionTask = nil
         recognitionState = nil
+        preferredCaptureAudioSettings = nil
+        if #available(macOS 26.0, *), let session = analyzerSession as? AnalyzerRecognitionSession {
+            session.cancel()
+        }
+        analyzerSession = nil
         startedAt = nil
         activeInputName = "Unknown"
         activeRecordingURL = nil
@@ -495,6 +559,265 @@ private final class LiveRecognitionState: @unchecked Sendable {
     }
 }
 
+@available(macOS 26.0, *)
+private final class AnalyzerRecognitionSession: @unchecked Sendable {
+    private let lock = NSLock()
+    private let localeIdentifier: String
+    private let transcriber: DictationTranscriber
+    private let analyzer: SpeechAnalyzer
+    private let inputContinuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation
+    private let onPartialTranscript: @MainActor @Sendable (String) -> Void
+    private let onDebugEvent: @MainActor @Sendable (SpeechRecognitionDebugEvent) -> Void
+    private var buffer = ProgressiveTranscriptBuffer()
+    private var analysisTask: Task<Void, Never>?
+    private var resultsTask: Task<Void, Never>?
+    private var continuation: CheckedContinuation<SpeechTranscript, Error>?
+    private var completedTranscript: SpeechTranscript?
+    private var completedError: Error?
+    private var isCompleted = false
+    private var didEndAudio = false
+    let captureAudioSettings: [String: Any]?
+
+    private init(
+        localeIdentifier: String,
+        transcriber: DictationTranscriber,
+        analyzer: SpeechAnalyzer,
+        inputContinuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation,
+        captureAudioSettings: [String: Any]?,
+        onPartialTranscript: @escaping @MainActor @Sendable (String) -> Void,
+        onDebugEvent: @escaping @MainActor @Sendable (SpeechRecognitionDebugEvent) -> Void
+    ) {
+        self.localeIdentifier = localeIdentifier
+        self.transcriber = transcriber
+        self.analyzer = analyzer
+        self.inputContinuation = inputContinuation
+        self.captureAudioSettings = captureAudioSettings
+        self.onPartialTranscript = onPartialTranscript
+        self.onDebugEvent = onDebugEvent
+    }
+
+    static func start(
+        locale: Locale,
+        onPartialTranscript: @escaping @MainActor @Sendable (String) -> Void,
+        onDebugEvent: @escaping @MainActor @Sendable (SpeechRecognitionDebugEvent) -> Void
+    ) async throws -> AnalyzerRecognitionSession {
+        guard let supportedLocale = await DictationTranscriber.supportedLocale(equivalentTo: locale) else {
+            throw SpeechEngineError.noLocalRecognizer
+        }
+
+        let transcriber = DictationTranscriber(
+            locale: supportedLocale,
+            contentHints: [],
+            transcriptionOptions: [.punctuation],
+            reportingOptions: [.volatileResults, .frequentFinalization],
+            attributeOptions: [.audioTimeRange, .transcriptionConfidence]
+        )
+        let modules: [any SpeechModule] = [transcriber]
+
+        let assetStatus = await AssetInventory.status(forModules: modules)
+        guard assetStatus != .unsupported else {
+            throw SpeechEngineError.noLocalRecognizer
+        }
+        if assetStatus != .installed, let installationRequest = try await AssetInventory.assetInstallationRequest(supporting: modules) {
+            try await installationRequest.downloadAndInstall()
+        }
+
+        let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: modules)
+        let analyzer = SpeechAnalyzer(modules: modules)
+        try await analyzer.prepareToAnalyze(in: analyzerFormat)
+
+        let (inputStream, inputContinuation) = AsyncThrowingStream<AnalyzerInput, Error>.makeStream(of: AnalyzerInput.self)
+        let session = AnalyzerRecognitionSession(
+            localeIdentifier: supportedLocale.identifier,
+            transcriber: transcriber,
+            analyzer: analyzer,
+            inputContinuation: inputContinuation,
+            captureAudioSettings: analyzerFormat.map(Self.captureAudioSettings),
+            onPartialTranscript: onPartialTranscript,
+            onDebugEvent: onDebugEvent
+        )
+        session.startTasks(inputStream: inputStream)
+        return session
+    }
+
+    func append(sampleBuffer: CMSampleBuffer) {
+        let shouldAcceptAudio = lock.withLock { !didEndAudio && !isCompleted }
+        guard shouldAcceptAudio, let pcmBuffer = sampleBuffer.localDictatePCMBuffer() else {
+            return
+        }
+
+        inputContinuation.yield(AnalyzerInput(buffer: pcmBuffer))
+    }
+
+    func finishAudio() throws {
+        let shouldFinish = lock.withLock {
+            guard !didEndAudio else { return false }
+            didEndAudio = true
+            return true
+        }
+        guard shouldFinish else { return }
+
+        inputContinuation.finish()
+    }
+
+    func waitForFinal(timeout: TimeInterval) async throws -> SpeechTranscript {
+        try await withCheckedThrowingContinuation { continuation in
+            var transcript: SpeechTranscript?
+            var error: Error?
+
+            lock.withLock {
+                if isCompleted {
+                    transcript = completedTranscript
+                    error = completedError
+                } else {
+                    self.continuation = continuation
+                }
+            }
+
+            if let transcript {
+                continuation.resume(returning: transcript)
+                return
+            }
+
+            if let error {
+                continuation.resume(throwing: error)
+                return
+            }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
+                self?.completeWithFinalOrLatest(
+                    fallbackError: SpeechEngineError.recognitionFailed("Timed out waiting for local speech recognition.")
+                )
+            }
+        }
+    }
+
+    func cancel() {
+        analysisTask?.cancel()
+        resultsTask?.cancel()
+        inputContinuation.finish()
+        Task {
+            await analyzer.cancelAndFinishNow()
+        }
+    }
+
+    private func startTasks(inputStream: AsyncThrowingStream<AnalyzerInput, Error>) {
+        resultsTask = Task { [weak self, transcriber] in
+            do {
+                for try await result in transcriber.results {
+                    self?.handle(result: result)
+                }
+                self?.completeWithFinalOrLatest(fallbackError: SpeechEngineError.emptyTranscript)
+            } catch {
+                self?.complete(.failure(SpeechEngineError.recognitionFailed(error.localDictateDiagnosticDescription)))
+            }
+        }
+
+        analysisTask = Task { [weak self, analyzer] in
+            do {
+                let lastSampleTime = try await analyzer.analyzeSequence(inputStream)
+                if let lastSampleTime {
+                    try await analyzer.finalizeAndFinish(through: lastSampleTime)
+                } else {
+                    await analyzer.cancelAndFinishNow()
+                }
+            } catch {
+                self?.complete(.failure(SpeechEngineError.recognitionFailed(error.localDictateDiagnosticDescription)))
+            }
+        }
+    }
+
+    private func handle(result: DictationTranscriber.Result) {
+        let incomingText = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !incomingText.isEmpty else { return }
+
+        let incomingWindow = Self.window(for: result.range)
+        let update = lock.withLock {
+            buffer.updateDetailed(
+                text: incomingText,
+                window: incomingWindow,
+                isFinal: result.isFinal
+            )
+        }
+
+        speechRecognitionLogger.debug(
+            "engine=analyzer decision=\(update.decision.rawValue, privacy: .public) incomingChars=\(update.incomingText.count, privacy: .public) outputChars=\(update.outputText.count, privacy: .public) isFinal=\(result.isFinal, privacy: .public)"
+        )
+
+        Task { @MainActor in
+            onPartialTranscript(update.outputText)
+            onDebugEvent(SpeechRecognitionDebugEvent(update: update))
+        }
+    }
+
+    private func completeWithFinalOrLatest(fallbackError: Error) {
+        let text = lock.withLock {
+            buffer.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if text.isEmpty {
+            complete(.failure(fallbackError))
+        } else {
+            complete(.success(SpeechTranscript(text: text, languageIdentifier: localeIdentifier)))
+        }
+    }
+
+    private func complete(_ result: Result<SpeechTranscript, Error>) {
+        var continuationToResume: CheckedContinuation<SpeechTranscript, Error>?
+
+        lock.withLock {
+            guard !isCompleted else { return }
+            isCompleted = true
+            continuationToResume = continuation
+            continuation = nil
+
+            switch result {
+            case .success(let transcript):
+                completedTranscript = transcript
+            case .failure(let error):
+                completedError = error
+            }
+        }
+
+        guard let continuationToResume else { return }
+
+        switch result {
+        case .success(let transcript):
+            continuationToResume.resume(returning: transcript)
+        case .failure(let error):
+            continuationToResume.resume(throwing: error)
+        }
+    }
+
+    private static func window(for range: CMTimeRange) -> TranscriptSegmentWindow {
+        let start = seconds(for: range.start) ?? 0
+        let end = seconds(for: CMTimeRangeGetEnd(range)) ?? start
+        return TranscriptSegmentWindow(start: start, end: max(start, end))
+    }
+
+    private static func seconds(for time: CMTime) -> TimeInterval? {
+        guard time.isValid, time.isNumeric else {
+            return nil
+        }
+        let seconds = CMTimeGetSeconds(time)
+        return seconds.isFinite ? seconds : nil
+    }
+
+    private static func captureAudioSettings(for format: AVAudioFormat) -> [String: Any] {
+        let description = format.streamDescription.pointee
+        let flags = description.mFormatFlags
+        return [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: description.mSampleRate,
+            AVNumberOfChannelsKey: Int(description.mChannelsPerFrame),
+            AVLinearPCMBitDepthKey: Int(description.mBitsPerChannel),
+            AVLinearPCMIsFloatKey: flags & kAudioFormatFlagIsFloat != 0,
+            AVLinearPCMIsBigEndianKey: flags & kAudioFormatFlagIsBigEndian != 0,
+            AVLinearPCMIsNonInterleaved: flags & kAudioFormatFlagIsNonInterleaved != 0
+        ]
+    }
+}
+
 private final class AudioLevelMeter: @unchecked Sendable {
     private let lock = NSLock()
     private var peak: Float = 0
@@ -699,6 +1022,85 @@ private final class AudioLevelMeter: @unchecked Sendable {
     private static func decibels(forLinearAmplitude value: Float) -> Float {
         guard value > 0 else { return -120 }
         return max(-120, 20 * log10(value))
+    }
+}
+
+private extension CMSampleBuffer {
+    func localDictatePCMBuffer() -> AVAudioPCMBuffer? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(self),
+              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
+              streamDescription.pointee.mFormatID == kAudioFormatLinearPCM,
+              let format = AVAudioFormat(streamDescription: streamDescription) else {
+            return nil
+        }
+
+        let frameCount = CMSampleBufferGetNumSamples(self)
+        guard frameCount > 0,
+              let pcmBuffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(frameCount)
+              ) else {
+            return nil
+        }
+        pcmBuffer.frameLength = AVAudioFrameCount(frameCount)
+
+        var audioBufferListSize = 0
+        let sizeStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            self,
+            bufferListSizeNeededOut: &audioBufferListSize,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: nil
+        )
+        guard sizeStatus == noErr, audioBufferListSize > 0 else {
+            return nil
+        }
+
+        let rawBufferList = UnsafeMutableRawPointer.allocate(
+            byteCount: audioBufferListSize,
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { rawBufferList.deallocate() }
+
+        var blockBuffer: CMBlockBuffer?
+        let listStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            self,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: rawBufferList.assumingMemoryBound(to: AudioBufferList.self),
+            bufferListSize: audioBufferListSize,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        guard listStatus == noErr else {
+            return nil
+        }
+
+        let sourceBuffers = UnsafeMutableAudioBufferListPointer(rawBufferList.assumingMemoryBound(to: AudioBufferList.self))
+        let destinationBuffers = UnsafeMutableAudioBufferListPointer(pcmBuffer.mutableAudioBufferList)
+        let count = min(sourceBuffers.count, destinationBuffers.count)
+        guard count > 0 else {
+            return nil
+        }
+
+        for index in 0..<count {
+            guard let sourceData = sourceBuffers[index].mData,
+                  let destinationData = destinationBuffers[index].mData else {
+                continue
+            }
+            let byteCount = min(
+                Int(sourceBuffers[index].mDataByteSize),
+                Int(destinationBuffers[index].mDataByteSize)
+            )
+            memcpy(destinationData, sourceData, byteCount)
+            destinationBuffers[index].mDataByteSize = UInt32(byteCount)
+        }
+
+        return pcmBuffer
     }
 }
 

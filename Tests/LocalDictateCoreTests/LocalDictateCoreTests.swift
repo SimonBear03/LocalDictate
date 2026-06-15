@@ -129,3 +129,81 @@ import Testing
     #expect(update.decision == .ignoredShortRegression)
     #expect(update.outputText == "First sentence second sentence after a pause")
 }
+
+@Test func progressiveTranscriptBufferKeepsFinalTextWhenVolatilePhraseChanges() {
+    var buffer = ProgressiveTranscriptBuffer()
+
+    buffer.updateDetailed(
+        text: "I don't think that's the way",
+        window: TranscriptSegmentWindow(start: 0.0, end: 1.8),
+        isFinal: true
+    )
+    buffer.updateDetailed(
+        text: "Apple dictation works on its own model",
+        window: TranscriptSegmentWindow(start: 1.9, end: 4.1),
+        isFinal: false
+    )
+    let update = buffer.updateDetailed(
+        text: "Apple dictation works on its own model, right?",
+        window: TranscriptSegmentWindow(start: 1.9, end: 4.5),
+        isFinal: false
+    )
+
+    #expect(update.outputText == "I don't think that's the way Apple dictation works on its own model, right?")
+}
+
+@Test func progressiveTranscriptBufferClearsVolatilePhraseWhenItFinalizes() {
+    var buffer = ProgressiveTranscriptBuffer()
+
+    buffer.updateDetailed(
+        text: "I want to test this",
+        window: TranscriptSegmentWindow(start: 0.0, end: 1.8),
+        isFinal: false
+    )
+    let update = buffer.updateDetailed(
+        text: "I want to test this.",
+        window: TranscriptSegmentWindow(start: 0.0, end: 1.9),
+        isFinal: true
+    )
+
+    #expect(update.outputText == "I want to test this.")
+}
+
+@Test func progressiveTranscriptBufferDoesNotDuplicateFullVolatileTranscript() {
+    var buffer = ProgressiveTranscriptBuffer()
+
+    buffer.updateDetailed(
+        text: "First sentence.",
+        window: TranscriptSegmentWindow(start: 0.0, end: 1.0),
+        isFinal: true
+    )
+    buffer.updateDetailed(
+        text: "First sentence. Second sentence.",
+        window: TranscriptSegmentWindow(start: 1.1, end: 2.0),
+        isFinal: false
+    )
+    let update = buffer.updateDetailed(
+        text: "First sentence. Second sentence.",
+        window: TranscriptSegmentWindow(start: 0.0, end: 2.0),
+        isFinal: true
+    )
+
+    #expect(update.outputText == "First sentence. Second sentence.")
+}
+
+@Test func progressiveTranscriptBufferDoesNotInsertSpacesBetweenCJKPhrases() {
+    var buffer = ProgressiveTranscriptBuffer()
+
+    buffer.updateDetailed(
+        text: "我想测试",
+        window: TranscriptSegmentWindow(start: 0.0, end: 1.0),
+        isFinal: true
+    )
+    let update = buffer.updateDetailed(
+        text: "中文显示",
+        window: TranscriptSegmentWindow(start: 1.1, end: 2.0),
+        isFinal: false
+    )
+
+    #expect(update.outputText == "我想测试中文显示")
+}

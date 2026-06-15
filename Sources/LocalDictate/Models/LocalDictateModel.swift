@@ -150,20 +150,23 @@ final class LocalDictateModel: ObservableObject {
             return
         }
 
-        do {
-            activeAudioURL = try recorder.startRecording(
-                inputDeviceID: selectedAudioInputDeviceID,
-                locale: selectedLocale,
-                retainAudio: audioRetention == .manualDelete
-            ) { [weak self] text in
-                self?.liveTranscript = text
-            } onDebugEvent: { [weak self] event in
-                self?.appendSpeechDebugEvent(event)
+        Task {
+            do {
+                activeAudioURL = try await recorder.startRecording(
+                    inputDeviceID: selectedAudioInputDeviceID,
+                    locale: selectedLocale,
+                    retainAudio: audioRetention == .manualDelete
+                ) { [weak self] text in
+                    self?.liveTranscript = text
+                } onDebugEvent: { [weak self] event in
+                    self?.appendSpeechDebugEvent(event)
+                }
+                status = .listening
+            } catch {
+                status = .error
+                latestError = error.localizedDescription
+                await refreshSystemState()
             }
-            status = .listening
-        } catch {
-            status = .error
-            latestError = error.localizedDescription
         }
     }
 
