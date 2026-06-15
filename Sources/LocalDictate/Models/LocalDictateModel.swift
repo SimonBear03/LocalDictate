@@ -273,7 +273,10 @@ final class LocalDictateModel: ObservableObject {
             latestError = nil
             status = .inserted
         case .copiedAccessibilityMissing:
-            latestError = "Copied text. Enable Accessibility permission for automatic paste, then refresh Privacy."
+            latestError = "Enable Accessibility permission for automatic paste. Text is ready in LocalDictate."
+            status = .ready
+        case .noEditableTextField:
+            latestError = "No editable text field is focused. Text is ready in LocalDictate."
             status = .ready
         }
     }

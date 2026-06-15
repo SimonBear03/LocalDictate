@@ -94,20 +94,18 @@ struct MenuBarContentView: View {
     }
 
     private var transcriptBoxHeight: CGFloat {
-        let lineCount = estimatedTranscriptLineCount(for: transcriptText)
-        let visibleLineCount = min(max(lineCount, 1), 7)
-        return CGFloat(visibleLineCount) * 22 + 10
+        let visibleLineCount = min(max(estimatedTranscriptLineCount, 2), 7)
+        return CGFloat(visibleLineCount) * 22 + 14
     }
 
-    private func estimatedTranscriptLineCount(for text: String) -> Int {
+    private var estimatedTranscriptLineCount: Int {
         let charactersPerLine = 34
-        let paragraphs = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let paragraphs = transcriptText.split(separator: "\n", omittingEmptySubsequences: false)
 
         return max(
             1,
-            paragraphs.reduce(0) { partialResult, paragraph in
-                let characterCount = max(paragraph.count, 1)
-                return partialResult + max(1, Int(ceil(Double(characterCount) / Double(charactersPerLine))))
+            paragraphs.reduce(0) { lineCount, paragraph in
+                lineCount + max(1, Int(ceil(Double(max(paragraph.count, 1)) / Double(charactersPerLine))))
             }
         )
     }

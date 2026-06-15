@@ -11,6 +11,9 @@ public struct TranscriptSegmentWindow: Equatable, Sendable {
 }
 
 public enum TranscriptAccumulatorDecision: String, Sendable {
+    case partialPreview
+    case finalResult
+    case fallbackLatest
     case emptyIgnored
     case started
     case unchanged

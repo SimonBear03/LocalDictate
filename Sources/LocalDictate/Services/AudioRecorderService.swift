@@ -90,6 +90,7 @@ final class AudioRecorderService: NSObject, AVCaptureAudioDataOutputSampleBuffer
         stopAudioCapture()
         state.markAudioEnded()
         request.endAudio()
+        recognitionTask?.finish()
 
         let transcript = try await state.waitForFinal(timeout: 12)
         let diagnostics = diagnostics(stoppedAt: stoppedAt)
@@ -250,7 +251,8 @@ enum AudioRecorderError: LocalizedError {
 private final class LiveRecognitionState: @unchecked Sendable {
     private let lock = NSLock()
     private let localeIdentifier: String
-    private var accumulator = TranscriptAccumulator()
+    private var committedText = ""
+    private var currentHypothesis = ""
     private var continuation: CheckedContinuation<SpeechTranscript, Error>?
     private var completedTranscript: SpeechTranscript?
     private var completedError: Error?
@@ -272,7 +274,33 @@ private final class LiveRecognitionState: @unchecked Sendable {
             let text = transcription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
                 let update = lock.withLock {
-                    accumulator.updateDetailed(text: text, window: Self.segmentWindow(for: transcription.segments))
+                    if result.isFinal {
+                        let previousText = composedText()
+                        commitFinalText(text)
+                        currentHypothesis = ""
+                        let outputText = composedText()
+                        return TranscriptAccumulatorUpdate(
+                            decision: .finalResult,
+                            previousText: previousText,
+                            incomingText: text,
+                            outputText: outputText,
+                            previousWindow: nil,
+                            incomingWindow: Self.segmentWindow(for: transcription.segments),
+                            outputWindow: Self.segmentWindow(for: transcription.segments)
+                        )
+                    }
+
+                    let previousText = composedText()
+                    currentHypothesis = text
+                    return TranscriptAccumulatorUpdate(
+                        decision: .partialPreview,
+                        previousText: previousText,
+                        incomingText: text,
+                        outputText: composedText(),
+                        previousWindow: nil,
+                        incomingWindow: Self.segmentWindow(for: transcription.segments),
+                        outputWindow: Self.segmentWindow(for: transcription.segments)
+                    )
                 }
                 speechRecognitionLogger.debug(
                     "decision=\(update.decision.rawValue, privacy: .public) incomingChars=\(update.incomingText.count, privacy: .public) outputChars=\(update.outputText.count, privacy: .public) isFinal=\(result.isFinal, privacy: .public)"
@@ -285,19 +313,32 @@ private final class LiveRecognitionState: @unchecked Sendable {
 
             let shouldComplete = lock.withLock { didEndAudio }
             if result.isFinal && shouldComplete {
-                completeWithLatestOrFailure(SpeechEngineError.emptyTranscript)
+                completeWithFinalOrLatest(fallbackError: SpeechEngineError.emptyTranscript)
                 return
             }
         }
 
         if let error {
-            completeWithLatestOrFailure(SpeechEngineError.recognitionFailed(error.localizedDescription))
+            let shouldFallback = lock.withLock { didEndAudio }
+            if shouldFallback {
+                completeWithFinalOrLatest(fallbackError: SpeechEngineError.recognitionFailed(error.localizedDescription))
+            } else {
+                complete(.failure(SpeechEngineError.recognitionFailed(error.localizedDescription)))
+            }
         }
     }
 
     func markAudioEnded() {
+        var completedTranscript: SpeechTranscript?
         lock.withLock {
             didEndAudio = true
+            if !committedText.isEmpty, currentHypothesis.isEmpty {
+                completedTranscript = SpeechTranscript(text: committedText, languageIdentifier: localeIdentifier)
+            }
+        }
+
+        if let completedTranscript {
+            complete(.success(completedTranscript))
         }
     }
 
@@ -326,23 +367,92 @@ private final class LiveRecognitionState: @unchecked Sendable {
             }
 
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
-                self?.completeWithLatestOrFailure(
-                    SpeechEngineError.recognitionFailed("Timed out waiting for local speech recognition.")
+                self?.completeWithFinalOrLatest(
+                    fallbackError: SpeechEngineError.recognitionFailed("Timed out waiting for local speech recognition.")
                 )
             }
         }
     }
 
-    private func completeWithLatestOrFailure(_ fallbackError: Error) {
-        let trimmed = lock.withLock {
-            accumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func completeWithFinalOrLatest(fallbackError: Error) {
+        let text = lock.withLock {
+            composedText().trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        if trimmed.isEmpty {
+        if text.isEmpty {
             complete(.failure(fallbackError))
         } else {
-            complete(.success(SpeechTranscript(text: trimmed, languageIdentifier: localeIdentifier)))
+            complete(.success(SpeechTranscript(text: text, languageIdentifier: localeIdentifier)))
         }
+    }
+
+    private func composedText() -> String {
+        if currentHypothesis.isEmpty {
+            return committedText
+        }
+
+        if committedText.isEmpty {
+            return currentHypothesis
+        }
+
+        if currentHypothesis == committedText ||
+            currentHypothesis.hasPrefix(committedText) ||
+            committedText.hasSuffix(currentHypothesis) {
+            return currentHypothesis.count >= committedText.count ? currentHypothesis : committedText
+        }
+
+        return Self.join(committedText, currentHypothesis)
+    }
+
+    private func commitFinalText(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        if committedText.isEmpty {
+            committedText = text
+            return
+        }
+
+        if committedText == text || committedText.hasSuffix(text) {
+            return
+        }
+
+        if text.hasPrefix(committedText) {
+            committedText = text
+            return
+        }
+
+        if let merged = Self.mergeOverlap(committedText, text) {
+            committedText = merged
+            return
+        }
+
+        committedText = Self.join(committedText, text)
+    }
+
+    private static func join(_ lhs: String, _ rhs: String) -> String {
+        let lhs = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rhs = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if lhs.isEmpty { return rhs }
+        if rhs.isEmpty { return lhs }
+
+        return "\(lhs) \(rhs)"
+    }
+
+    private static func mergeOverlap(_ lhs: String, _ rhs: String) -> String? {
+        let maxLength = min(lhs.count, rhs.count)
+        guard maxLength >= 12 else { return nil }
+
+        for length in stride(from: maxLength, through: 12, by: -1) {
+            let lhsStart = lhs.index(lhs.endIndex, offsetBy: -length)
+            let rhsEnd = rhs.index(rhs.startIndex, offsetBy: length)
+            if lhs[lhsStart...] == rhs[..<rhsEnd] {
+                return lhs + rhs[rhsEnd...]
+            }
+        }
+
+        return nil
     }
 
     private static func segmentWindow(for segments: [SFTranscriptionSegment]) -> TranscriptSegmentWindow? {
