@@ -1,6 +1,12 @@
 import AppKit
 import ApplicationServices
 import LocalDictateCore
+import OSLog
+
+private let insertionLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.simonbear.localdictate",
+    category: "Insertion"
+)
 
 enum InsertionResult: Sendable {
     case empty
@@ -14,21 +20,33 @@ final class InsertionService {
     func insertOrCopy(_ text: String, mode: InsertionMode) throws -> InsertionResult {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
+            insertionLogger.info("insertion skipped reason=empty")
             return .empty
         }
+
+        insertionLogger.info(
+            "insertion requested mode=\(mode.rawValue, privacy: .public) chars=\(trimmed.count, privacy: .public) frontmost=\(TargetAppService.frontmostAppName(), privacy: .public)"
+        )
 
         let pasteboard = NSPasteboard.general
         if mode == .copyOnly {
             pasteboard.clearContents()
             pasteboard.setString(trimmed, forType: .string)
+            insertionLogger.info("insertion completed result=copied chars=\(trimmed.count, privacy: .public)")
             return .copied
         }
 
         guard AXIsProcessTrusted() else {
+            insertionLogger.warning("insertion blocked result=accessibilityMissing")
             return .copiedAccessibilityMissing
         }
 
-        guard focusedElementAcceptsTextInput() else {
+        let focusStatus = focusedElementTextInputStatus()
+        insertionLogger.info(
+            "paste-time focus check accepts=\(focusStatus.acceptsText, privacy: .public) allowsPaste=\(focusStatus.allowsPaste, privacy: .public) source=\(focusStatus.source, privacy: .public) reason=\(focusStatus.reason, privacy: .public) role=\(focusStatus.role ?? "nil", privacy: .public) subrole=\(focusStatus.subrole ?? "nil", privacy: .public) valueSettable=\(focusStatus.isValueSettable, privacy: .public)"
+        )
+
+        guard focusStatus.allowsPaste else {
             return .noEditableTextField
         }
 
@@ -36,50 +54,132 @@ final class InsertionService {
         pasteboard.clearContents()
         pasteboard.setString(trimmed, forType: .string)
         postCommandV()
+        insertionLogger.info(
+            "insertion completed result=pasted chars=\(trimmed.count, privacy: .public) frontmost=\(TargetAppService.frontmostAppName(), privacy: .public) focusConfirmed=\(focusStatus.acceptsText, privacy: .public)"
+        )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             previousPasteboard.restore(to: pasteboard)
+            insertionLogger.debug("pasteboard restored after automatic paste")
         }
         return .pasted
     }
 
-    private func focusedElementAcceptsTextInput() -> Bool {
-        let systemElement = AXUIElementCreateSystemWide()
-        var focusedValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            systemElement,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedValue
-        ) == .success, let focusedValue else {
-            return false
+    private func focusedElementTextInputStatus() -> FocusedTextInputStatus {
+        let lookup = focusedElementLookup()
+        guard let focusedValue = lookup.value else {
+            return FocusedTextInputStatus(
+                acceptsText: false,
+                allowsPaste: true,
+                source: lookup.source,
+                reason: "noFocusedElement",
+                role: nil,
+                subrole: nil,
+                isValueSettable: false
+            )
         }
 
         guard CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else {
-            return false
+            return FocusedTextInputStatus(
+                acceptsText: false,
+                allowsPaste: true,
+                source: lookup.source,
+                reason: "focusedValueNotAXElement",
+                role: nil,
+                subrole: nil,
+                isValueSettable: false
+            )
         }
         let focusedElement = focusedValue as! AXUIElement
-        guard !hasSecureTextSubrole(focusedElement) else {
-            return false
-        }
-
-        if isKnownTextInputRole(focusedElement) {
-            return true
-        }
-
+        let role = stringAttribute(kAXRoleAttribute, from: focusedElement)
+        let subrole = stringAttribute(kAXSubroleAttribute, from: focusedElement)
         var isSettable = DarwinBoolean(false)
-        if AXUIElementIsAttributeSettable(
+        let settableStatus = AXUIElementIsAttributeSettable(
             focusedElement,
             kAXValueAttribute as CFString,
             &isSettable
-        ) == .success, isSettable.boolValue {
-            return true
+        )
+        let valueSettable = settableStatus == .success && isSettable.boolValue
+
+        guard subrole != "AXSecureTextField" else {
+            return FocusedTextInputStatus(
+                acceptsText: false,
+                allowsPaste: false,
+                source: lookup.source,
+                reason: "secureTextField",
+                role: role,
+                subrole: subrole,
+                isValueSettable: valueSettable
+            )
         }
 
-        return false
+        if isKnownTextInputRole(role) {
+            return FocusedTextInputStatus(
+                acceptsText: true,
+                allowsPaste: true,
+                source: lookup.source,
+                reason: "knownTextRole",
+                role: role,
+                subrole: subrole,
+                isValueSettable: valueSettable
+            )
+        }
+
+        if valueSettable {
+            return FocusedTextInputStatus(
+                acceptsText: true,
+                allowsPaste: true,
+                source: lookup.source,
+                reason: "settableAXValue",
+                role: role,
+                subrole: subrole,
+                isValueSettable: valueSettable
+            )
+        }
+
+        return FocusedTextInputStatus(
+            acceptsText: false,
+            allowsPaste: false,
+            source: lookup.source,
+            reason: "notEditable",
+            role: role,
+            subrole: subrole,
+            isValueSettable: valueSettable
+        )
     }
 
-    private func isKnownTextInputRole(_ element: AXUIElement) -> Bool {
-        guard let role = stringAttribute(kAXRoleAttribute, from: element) else {
+    private func focusedElementLookup() -> (value: CFTypeRef?, source: String) {
+        let systemElement = AXUIElementCreateSystemWide()
+        if let focusedValue = focusedElement(from: systemElement) {
+            return (focusedValue, "systemWide")
+        }
+
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+            return (nil, "systemWide")
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+        if let focusedValue = focusedElement(from: appElement) {
+            return (focusedValue, "frontmostApplication")
+        }
+
+        return (nil, "frontmostApplication")
+    }
+
+    private func focusedElement(from element: AXUIElement) -> CFTypeRef? {
+        var focusedValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedValue
+        ) == .success else {
+            return nil
+        }
+        return focusedValue
+    }
+
+    private func isKnownTextInputRole(_ role: String?) -> Bool {
+        guard let role else {
             return false
         }
 
@@ -88,10 +188,6 @@ final class InsertionService {
             kAXTextAreaRole,
             kAXComboBoxRole
         ].contains(role)
-    }
-
-    private func hasSecureTextSubrole(_ element: AXUIElement) -> Bool {
-        stringAttribute(kAXSubroleAttribute, from: element) == "AXSecureTextField"
     }
 
     private func stringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
@@ -112,6 +208,16 @@ final class InsertionService {
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
     }
+}
+
+private struct FocusedTextInputStatus: Sendable {
+    var acceptsText: Bool
+    var allowsPaste: Bool
+    var source: String
+    var reason: String
+    var role: String?
+    var subrole: String?
+    var isValueSettable: Bool
 }
 
 private struct PasteboardSnapshot: @unchecked Sendable {

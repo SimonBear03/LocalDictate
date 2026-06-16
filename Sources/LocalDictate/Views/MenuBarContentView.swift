@@ -4,6 +4,7 @@ import SwiftUI
 struct MenuBarContentView: View {
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var model: LocalDictateModel
+    @State private var transcriptContentHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -83,9 +84,21 @@ struct MenuBarContentView: View {
                     .font(.body)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.vertical, 2)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: TranscriptContentHeightKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    }
             }
-            .frame(height: transcriptBoxHeight)
+            .frame(height: transcriptBoxHeight, alignment: .top)
+            .onPreferenceChange(TranscriptContentHeightKey.self) { height in
+                transcriptContentHeight = height
+            }
         }
     }
 
@@ -94,21 +107,12 @@ struct MenuBarContentView: View {
     }
 
     private var transcriptBoxHeight: CGFloat {
-        let visibleLineCount = min(max(estimatedTranscriptLineCount, 2), 7)
-        return CGFloat(visibleLineCount) * 22 + 14
+        let contentHeight = transcriptContentHeight > 0 ? transcriptContentHeight : Self.minimumTranscriptBoxHeight
+        return min(max(contentHeight, Self.minimumTranscriptBoxHeight), Self.maximumTranscriptBoxHeight)
     }
 
-    private var estimatedTranscriptLineCount: Int {
-        let charactersPerLine = 34
-        let paragraphs = transcriptText.split(separator: "\n", omittingEmptySubsequences: false)
-
-        return max(
-            1,
-            paragraphs.reduce(0) { lineCount, paragraph in
-                lineCount + max(1, Int(ceil(Double(max(paragraph.count, 1)) / Double(charactersPerLine))))
-            }
-        )
-    }
+    private static let minimumTranscriptBoxHeight: CGFloat = 42
+    private static let maximumTranscriptBoxHeight: CGFloat = 176
 
     private var statusDetail: String {
         switch model.status {
@@ -120,6 +124,14 @@ struct MenuBarContentView: View {
         case .inserted: "Text was pasted into the target app."
         case .error: "Open diagnostics for details."
         }
+    }
+}
+
+private struct TranscriptContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
