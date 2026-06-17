@@ -44,11 +44,18 @@ struct InsertionDiagnostics: Sendable {
     var focusValueSettable: Bool?
 }
 
+@MainActor
 final class InsertionService {
     func insertOrCopy(_ text: String, mode: InsertionMode) throws -> InsertionOutcome {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let frontmostAppName = TargetAppService.frontmostAppName()
+        RuntimeDiagnostics.logSync(
+            scope: "Insertion",
+            message: "insertOrCopy begin",
+            details: "mode=\(mode.rawValue) chars=\(trimmed.count) frontmost=\(frontmostAppName)"
+        )
         guard !trimmed.isEmpty else {
+            RuntimeDiagnostics.logSync(scope: "Insertion", message: "empty text")
             insertionLogger.info("insertion skipped reason=empty")
             return outcome(
                 result: .empty,
@@ -65,8 +72,10 @@ final class InsertionService {
 
         let pasteboard = NSPasteboard.general
         if mode == .copyOnly {
+            RuntimeDiagnostics.logSync(scope: "Insertion", message: "copyOnly pasteboard write begin")
             pasteboard.clearContents()
             pasteboard.setString(trimmed, forType: .string)
+            RuntimeDiagnostics.logSync(scope: "Insertion", message: "copyOnly pasteboard write complete")
             insertionLogger.info("insertion completed result=copied chars=\(trimmed.count, privacy: .public)")
             return outcome(
                 result: .copied,
@@ -79,6 +88,7 @@ final class InsertionService {
 
         let accessibilityTrusted = AXIsProcessTrusted()
         guard accessibilityTrusted else {
+            RuntimeDiagnostics.logSync(scope: "Insertion", message: "blocked: accessibility missing")
             insertionLogger.warning("insertion blocked result=accessibilityMissing")
             return outcome(
                 result: .copiedAccessibilityMissing,
@@ -89,12 +99,19 @@ final class InsertionService {
             )
         }
 
+        RuntimeDiagnostics.logSync(scope: "Insertion", message: "focus check begin")
         let focusStatus = focusedElementTextInputStatus()
+        RuntimeDiagnostics.logSync(
+            scope: "Insertion",
+            message: "focus check complete",
+            details: "allowsPaste=\(focusStatus.allowsPaste) source=\(focusStatus.source) reason=\(focusStatus.reason) role=\(focusStatus.role ?? "nil") subrole=\(focusStatus.subrole ?? "nil")"
+        )
         insertionLogger.info(
             "paste-time focus check accepts=\(focusStatus.acceptsText, privacy: .public) allowsPaste=\(focusStatus.allowsPaste, privacy: .public) source=\(focusStatus.source, privacy: .public) reason=\(focusStatus.reason, privacy: .public) role=\(focusStatus.role ?? "nil", privacy: .public) subrole=\(focusStatus.subrole ?? "nil", privacy: .public) valueSettable=\(focusStatus.isValueSettable, privacy: .public)"
         )
 
         guard focusStatus.allowsPaste else {
+            RuntimeDiagnostics.logSync(scope: "Insertion", message: "blocked: no editable text field")
             return outcome(
                 result: .noEditableTextField,
                 mode: mode,
@@ -105,16 +122,23 @@ final class InsertionService {
             )
         }
 
+        RuntimeDiagnostics.logSync(scope: "Insertion", message: "pasteboard text snapshot begin")
         let previousPasteboard = PasteboardSnapshot.capture(from: pasteboard)
+        RuntimeDiagnostics.logSync(scope: "Insertion", message: "pasteboard text snapshot complete")
+        RuntimeDiagnostics.logSync(scope: "Insertion", message: "pasteboard write begin")
         pasteboard.clearContents()
         pasteboard.setString(trimmed, forType: .string)
+        RuntimeDiagnostics.logSync(scope: "Insertion", message: "command-v post begin")
         postCommandV()
+        RuntimeDiagnostics.logSync(scope: "Insertion", message: "command-v post complete")
         insertionLogger.info(
             "insertion completed result=pasted chars=\(trimmed.count, privacy: .public) frontmost=\(frontmostAppName, privacy: .public) focusConfirmed=\(focusStatus.acceptsText, privacy: .public)"
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            RuntimeDiagnostics.logSync(scope: "Insertion", message: "pasteboard restore begin")
             previousPasteboard.restore(to: pasteboard)
+            RuntimeDiagnostics.logSync(scope: "Insertion", message: "pasteboard restore complete")
             insertionLogger.debug("pasteboard restored after automatic paste")
         }
         return outcome(
@@ -307,19 +331,16 @@ private struct FocusedTextInputStatus: Sendable {
     var isValueSettable: Bool
 }
 
-private struct PasteboardSnapshot: @unchecked Sendable {
-    var items: [NSPasteboardItem]
+private struct PasteboardSnapshot: Sendable {
+    var string: String?
 
     static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
-        let copiedItems = pasteboard.pasteboardItems?.compactMap {
-            $0.copy() as? NSPasteboardItem
-        } ?? []
-        return PasteboardSnapshot(items: copiedItems)
+        PasteboardSnapshot(string: pasteboard.string(forType: .string))
     }
 
     func restore(to pasteboard: NSPasteboard) {
+        guard let string else { return }
         pasteboard.clearContents()
-        guard !items.isEmpty else { return }
-        pasteboard.writeObjects(items)
+        pasteboard.setString(string, forType: .string)
     }
 }

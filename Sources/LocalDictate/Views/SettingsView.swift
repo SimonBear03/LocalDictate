@@ -70,9 +70,11 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .systemWindowSurface()
         .navigationTitle("Settings")
-        .task {
+        .onAppear {
             model.templateStore.load()
-            await model.refreshSystemState()
+            Task { @MainActor in
+                await model.refreshSystemState()
+            }
         }
         .onChange(of: model.selectedLocaleIdentifier) { _, _ in
             Task { await model.refreshSystemState() }

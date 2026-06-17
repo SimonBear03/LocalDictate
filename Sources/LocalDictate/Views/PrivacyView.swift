@@ -60,8 +60,10 @@ struct PrivacyView: View {
         .formStyle(.grouped)
         .systemWindowSurface()
         .navigationTitle("Privacy")
-        .task {
-            await model.refreshSystemState()
+        .onAppear {
+            Task { @MainActor in
+                await model.refreshSystemState()
+            }
         }
     }
 }

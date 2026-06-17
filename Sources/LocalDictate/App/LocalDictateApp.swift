@@ -6,14 +6,11 @@ import SwiftUI
 @MainActor
 struct LocalDictateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model: LocalDictateModel
+    private static let sharedModel = LocalDictateModel()
+    private let model = LocalDictateApp.sharedModel
 
     init() {
-        let model = LocalDictateModel()
-        _model = StateObject(wrappedValue: model)
-        Task { @MainActor [model] in
-            model.launch()
-        }
+        model.launch()
     }
 
     var body: some Scene {
@@ -32,15 +29,12 @@ struct LocalDictateApp: App {
                 .accentColor(.blue)
                 .configuredAppWindowAppearance()
                 .frame(minWidth: 720, minHeight: 420)
-                .task {
-                    model.launch()
-                }
         }
         .defaultSize(width: 980, height: 660)
         .defaultLaunchBehavior(.presented)
         .commands {
             CommandGroup(after: .newItem) {
-                Button(model.status == .listening ? "Stop Recording" : "Start Recording") {
+                Button("Toggle Recording") {
                     model.toggleRecording()
                 }
                 .keyboardShortcut("d", modifiers: [.command])
@@ -56,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         WindowFocusService.focusMainWindow()
         return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
     }
 }
 

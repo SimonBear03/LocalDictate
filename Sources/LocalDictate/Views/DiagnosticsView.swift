@@ -31,6 +31,7 @@ struct DiagnosticsView: View {
                 Text(model.localAPIService.status.detail)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                LabeledContent("Trace File", value: RuntimeDiagnostics.logFilePath)
             }
             .systemGroupedRowSurface()
 
@@ -86,6 +87,28 @@ struct DiagnosticsView: View {
             }
             .systemGroupedRowSurface()
 
+            Section("Runtime Trace") {
+                if model.runtimeDiagnostics.isEmpty {
+                    Text("No trace events captured yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.runtimeDiagnostics) { event in
+                        RuntimeTraceRow(event: event)
+                    }
+                }
+
+                HStack {
+                    Button("Refresh") {
+                        Task { await model.refreshRuntimeDiagnostics() }
+                    }
+
+                    Button("Clear Trace") {
+                        model.clearRuntimeDiagnostics()
+                    }
+                }
+            }
+            .systemGroupedRowSurface()
+
             if let latestError = model.latestError {
                 Section("Latest Error") {
                     Text(latestError)
@@ -127,8 +150,11 @@ struct DiagnosticsView: View {
         .formStyle(.grouped)
         .systemWindowSurface()
         .navigationTitle("Diagnostics")
-        .task {
-            await model.refreshSystemState()
+        .onAppear {
+            Task { @MainActor in
+                await model.refreshSystemState()
+                await model.refreshRuntimeDiagnostics()
+            }
         }
     }
 }
@@ -187,6 +213,37 @@ private struct SpeechTraceRow: View {
             return "--"
         }
         return String(format: "%.2f-%.2f", window.start, window.end)
+    }
+}
+
+private struct RuntimeTraceRow: View {
+    var event: RuntimeTraceEvent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(event.scope)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text(event.date.formatted(date: .omitted, time: .standard))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(event.message)
+                .font(.caption)
+
+            if let details = event.details, !details.isEmpty {
+                Text(details)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

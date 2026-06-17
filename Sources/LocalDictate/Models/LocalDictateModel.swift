@@ -14,6 +14,7 @@ final class LocalDictateModel: ObservableObject {
     @Published var activeAudioURL: URL?
     @Published var lastAudioDiagnostics: AudioRecordingDiagnostics?
     @Published var lastInsertionDiagnostics: InsertionDiagnostics?
+    @Published private(set) var runtimeDiagnostics: [RuntimeTraceEvent] = []
     @Published var audioInputDevices: [AudioInputDeviceChoice] = [.systemDefault]
     @Published var selectedSidebarSection: SidebarSection? = .history
     @Published var hotkeyDescription = "⌘D"
@@ -73,6 +74,7 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func launch() {
+        RuntimeDiagnostics.log(scope: "Model", message: "launch called")
         guard !didLaunch else { return }
         didLaunch = true
         historyStore.load()
@@ -80,10 +82,12 @@ final class LocalDictateModel: ObservableObject {
         registerGlobalHotkey()
         Task {
             await refreshSystemState()
+            await refreshRuntimeDiagnostics()
         }
     }
 
     func refreshSystemState() async {
+        RuntimeDiagnostics.log(scope: "Model", message: "refreshSystemState")
         permissions = PermissionService.snapshot()
         refreshAudioInputDevices()
         speechAvailability = await speechEngine.availability(locale: selectedLocale)
@@ -95,7 +99,8 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func requestMicrophonePermission() {
-        Task {
+        RuntimeDiagnostics.log(scope: "Permissions", message: "requestMicrophonePermission")
+        Task { @MainActor in
             _ = await PermissionService.requestMicrophone()
             permissionNotice = nil
             await refreshSystemState()
@@ -103,7 +108,8 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func requestSpeechPermission() {
-        Task {
+        RuntimeDiagnostics.log(scope: "Permissions", message: "requestSpeechPermission")
+        Task { @MainActor in
             _ = await PermissionService.requestSpeech()
             permissionNotice = nil
             await refreshSystemState()
@@ -112,6 +118,7 @@ final class LocalDictateModel: ObservableObject {
 
     @discardableResult
     func requestAccessibility() -> PermissionState {
+        RuntimeDiagnostics.log(scope: "Permissions", message: "requestAccessibility")
         let state = PermissionService.requestAccessibilityPrompt()
         permissions = PermissionService.snapshot()
 
@@ -131,6 +138,7 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func toggleRecording() {
+        RuntimeDiagnostics.log(scope: "Recording", message: "toggleRecording", details: "status=\(status)")
         if status == .listening {
             stopRecording()
         } else {
@@ -139,28 +147,34 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func registerGlobalHotkey() {
+        RuntimeDiagnostics.log(scope: "Hotkey", message: "registerGlobalHotkey")
         do {
             try hotkeyService.registerCommandD { [weak self] in
                 self?.toggleRecording()
             }
             hotkeyDescription = "⌘D"
             hotkeyError = nil
+            RuntimeDiagnostics.log(scope: "Hotkey", message: "commandD registered")
         } catch {
             hotkeyError = error.localizedDescription
+            RuntimeDiagnostics.log(scope: "Hotkey", message: "registerCommandD failed", details: error.localizedDescription)
         }
     }
 
     func startRecording() {
+        RuntimeDiagnostics.log(scope: "Recording", message: "startRecording", details: "current=\(status)")
         latestError = nil
         didOfferAccessibilityForCurrentRecording = false
 
         Task { @MainActor in
             let permissionSetup = await ensureRecordingPermissions()
             guard permissionSetup.allGranted else {
+                RuntimeDiagnostics.log(scope: "Recording", message: "startRecording blocked: permissions")
                 return
             }
 
             guard await ensureAccessibilityForAutoPasteIfNeeded() else {
+                RuntimeDiagnostics.log(scope: "Recording", message: "startRecording blocked: accessibility")
                 return
             }
 
@@ -187,6 +201,7 @@ final class LocalDictateModel: ObservableObject {
                 }
                 status = .listening
             } catch {
+                RuntimeDiagnostics.log(scope: "Recording", message: "startRecording failed", details: error.localizedDescription)
                 status = .error
                 latestError = error.localizedDescription
                 await refreshSystemState()
@@ -195,11 +210,13 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func stopRecording() {
+        RuntimeDiagnostics.log(scope: "Recording", message: "stopRecording", details: "current=\(status)")
         guard status == .listening else { return }
         status = .transcribing
-        Task {
+        Task { @MainActor in
             do {
                 guard let recording = try await recorder.stopRecording() else {
+                    RuntimeDiagnostics.log(scope: "Recording", message: "stopRecording found no active recording")
                     status = .error
                     latestError = "No active recording was found."
                     return
@@ -210,9 +227,11 @@ final class LocalDictateModel: ObservableObject {
 
                 if let writeError = recording.diagnostics.writeErrorDescription {
                     latestError = "Audio was transcribed, but saving the optional audio copy failed: \(writeError)"
+                    RuntimeDiagnostics.log(scope: "Recording", message: "audio copy save warning", details: writeError)
                 }
 
                 guard !recording.diagnostics.isProbablySilent else {
+                    RuntimeDiagnostics.log(scope: "Recording", message: "recording appears silent", details: recording.diagnostics.summary)
                     status = .error
                     latestError = "The recording appears silent (\(recording.diagnostics.summary)). Check the Mac input device and microphone level."
                     return
@@ -220,6 +239,7 @@ final class LocalDictateModel: ObservableObject {
 
                 await processRecording(recording)
             } catch {
+                RuntimeDiagnostics.log(scope: "Recording", message: "stopRecording failed", details: error.localizedDescription)
                 status = .error
                 latestError = error.localizedDescription
                 await refreshSystemState()
@@ -234,30 +254,36 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func insertLatest() {
+        RuntimeDiagnostics.log(scope: "Insertion", message: "insertLatest")
         do {
             applyInsertionOutcome(try insertionService.insertOrCopy(latestText, mode: insertionMode))
         } catch {
+            RuntimeDiagnostics.log(scope: "Insertion", message: "insertLatest failed", details: error.localizedDescription)
             latestError = error.localizedDescription
             status = .error
         }
     }
 
     func runSampleCleanup() {
+        RuntimeDiagnostics.log(scope: "Cleanup", message: "runSampleCleanup")
         liveTranscript = "this is a local dictate test please clean it up and make it useful"
         status = .cleaning
-        Task {
+        Task { @MainActor in
             do {
                 cleanedText = try await cleanupService.clean(text: liveTranscript, template: selectedTemplate)
+                RuntimeDiagnostics.log(scope: "Cleanup", message: "sample cleanup success")
                 status = .ready
             } catch {
                 cleanedText = ""
                 latestError = "Cleanup failed. Raw transcript is ready: \(error.localizedDescription)"
+                RuntimeDiagnostics.log(scope: "Cleanup", message: "sample cleanup failed", details: error.localizedDescription)
                 status = .ready
             }
         }
     }
 
     private func processRecording(_ recording: AudioRecordingResult) async {
+        RuntimeDiagnostics.log(scope: "Recording", message: "processRecording")
         let transcript = recording.transcript
         liveTranscript = transcript.text
 
@@ -272,10 +298,12 @@ final class LocalDictateModel: ObservableObject {
         do {
             cleaned = try await cleanupService.clean(text: transcript.text, template: selectedTemplate)
             cleanedText = cleaned
+            RuntimeDiagnostics.log(scope: "Cleanup", message: "cleaned transcript", details: "chars=\(transcript.text.count)")
         } catch {
             cleaned = ""
             cleanedText = ""
             cleanupWarning = "Cleanup failed. Raw transcript is ready: \(error.localizedDescription)"
+            RuntimeDiagnostics.log(scope: "Cleanup", message: "cleanup failed", details: error.localizedDescription)
         }
 
         let record = DictationRecord(
@@ -291,19 +319,23 @@ final class LocalDictateModel: ObservableObject {
 
         do {
             let insertionText = DictationTextSelection.preferredText(rawTranscript: transcript.text, cleanedText: cleaned)
+            RuntimeDiagnostics.log(scope: "Insertion", message: "applying insertion result")
             applyInsertionOutcome(
                 try insertionService.insertOrCopy(insertionText, mode: insertionMode),
                 fallbackWarning: cleanupWarning
             )
         } catch {
+            RuntimeDiagnostics.log(scope: "Insertion", message: "insertion service failed", details: error.localizedDescription)
             status = .error
             latestError = error.localizedDescription
         }
 
         await refreshSystemState()
+        await refreshRuntimeDiagnostics()
     }
 
     private func applyInsertionOutcome(_ outcome: InsertionOutcome, fallbackWarning: String? = nil) {
+        RuntimeDiagnostics.log(scope: "Insertion", message: "applyInsertionOutcome", details: "result=\(outcome.result)")
         lastInsertionDiagnostics = outcome.diagnostics
 
         switch outcome.result {
@@ -335,6 +367,7 @@ final class LocalDictateModel: ObservableObject {
     }
 
     private func ensureAccessibilityForAutoPasteIfNeeded() async -> Bool {
+        RuntimeDiagnostics.log(scope: "Permissions", message: "ensureAccessibilityForAutoPasteIfNeeded")
         guard insertionMode == .autoPaste else {
             didOfferAccessibilityForCurrentRecording = false
             return true
@@ -347,18 +380,21 @@ final class LocalDictateModel: ObservableObject {
 
         didOfferAccessibilityForCurrentRecording = true
         _ = requestAccessibility()
-                status = .error
-                latestError = "Accessibility permission updated. Press ⌘D again to start recording."
-                await refreshSystemState()
-                return false
-            }
+        status = .error
+        latestError = "Accessibility permission updated. Press ⌘D again to start recording."
+        await refreshSystemState()
+        RuntimeDiagnostics.log(scope: "Permissions", message: "auto-paste permission not granted")
+        return false
+    }
 
     private func ensureRecordingPermissions() async -> (allGranted: Bool, permissionsWereRequested: Bool) {
+        RuntimeDiagnostics.log(scope: "Permissions", message: "ensureRecordingPermissions")
         let microphoneResult = await resolveMicrophonePermission()
         let speechResult = await resolveSpeechPermission()
         let permissionsWereRequested = microphoneResult.requested || speechResult.requested
 
         guard microphoneResult.state == .granted else {
+            RuntimeDiagnostics.log(scope: "Permissions", message: "microphone not granted", details: "state=\(microphoneResult.state)")
             status = .error
             latestError = permissionError(
                 permissionName: "Microphone",
@@ -370,6 +406,7 @@ final class LocalDictateModel: ObservableObject {
         }
 
         guard speechResult.state == .granted else {
+            RuntimeDiagnostics.log(scope: "Permissions", message: "speech not granted", details: "state=\(speechResult.state)")
             status = .error
             latestError = permissionError(
                 permissionName: "Speech Recognition",
@@ -385,6 +422,7 @@ final class LocalDictateModel: ObservableObject {
     }
 
     private func resolveMicrophonePermission() async -> (state: PermissionState, requested: Bool) {
+        RuntimeDiagnostics.log(scope: "Permissions", message: "resolveMicrophonePermission")
         let state = PermissionService.microphoneState()
         guard state == .notDetermined else {
             return (state, false)
@@ -394,6 +432,7 @@ final class LocalDictateModel: ObservableObject {
     }
 
     private func resolveSpeechPermission() async -> (state: PermissionState, requested: Bool) {
+        RuntimeDiagnostics.log(scope: "Permissions", message: "resolveSpeechPermission")
         let state = PermissionService.speechState()
         guard state == .notDetermined else {
             return (state, false)
@@ -418,9 +457,21 @@ final class LocalDictateModel: ObservableObject {
     }
 
     private func appendSpeechDebugEvent(_ event: SpeechRecognitionDebugEvent) {
+        RuntimeDiagnostics.log(scope: "Recognition", message: "appendSpeechDebugEvent", details: event.decision.rawValue)
         speechDebugEvents.insert(event, at: 0)
         if speechDebugEvents.count > 80 {
             speechDebugEvents.removeLast(speechDebugEvents.count - 80)
+        }
+    }
+
+    func refreshRuntimeDiagnostics() async {
+        runtimeDiagnostics = await RuntimeDiagnostics.shared.snapshot(limit: 40)
+    }
+
+    func clearRuntimeDiagnostics() {
+        runtimeDiagnostics.removeAll()
+        Task {
+            await RuntimeDiagnostics.shared.clear()
         }
     }
 }

@@ -50,9 +50,11 @@ struct MenuBarContentView: View {
         .padding(16)
         .frame(width: 340)
         .systemWindowSurface()
-        .task {
-            model.launch()
-            await model.refreshSystemState()
+        .onAppear {
+            Task { @MainActor in
+                await model.refreshSystemState()
+                await model.refreshRuntimeDiagnostics()
+            }
         }
     }
 
