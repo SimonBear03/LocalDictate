@@ -55,18 +55,6 @@ struct SettingsView: View {
             }
             .systemGroupedRowSurface()
 
-            Section("Insertion") {
-                Picker("Mode", selection: $model.insertionMode) {
-                    ForEach(InsertionMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                Text("Auto Paste requires Accessibility permission. Copy Only never posts keyboard events.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .systemGroupedRowSurface()
-
             Section("History") {
                 Picker("Audio", selection: $model.audioRetention) {
                     ForEach(AudioRetention.allCases) { retention in

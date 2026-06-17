@@ -26,7 +26,7 @@ struct PermissionRowsView: View {
             state: model.permissions.accessibility,
             detail: "Only needed for automatic Cmd+V insertion.",
             actionTitle: model.permissions.accessibility == .granted ? nil : "Open Settings",
-            action: model.requestAccessibility
+            action: { _ = model.requestAccessibility() }
         )
     }
 }

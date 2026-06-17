@@ -69,6 +69,21 @@ enum PermissionService {
     }
 
     @MainActor
+    static func confirmOpenAccessibilitySettings() -> Bool {
+        // Keep this as an explicit user-confirmed alert instead of an implicit settings jump.
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Enable Accessibility for Auto Paste"
+        alert.informativeText = "macOS requires you to manually enable Accessibility permission before LocalDictate can paste into other apps. Your dictated text has been copied, so it is not lost."
+        alert.addButton(withTitle: "Open Accessibility Settings")
+        alert.addButton(withTitle: "Not Now")
+
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    @MainActor
     static func openAccessibilitySettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))

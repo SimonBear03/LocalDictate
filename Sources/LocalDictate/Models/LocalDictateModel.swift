@@ -22,9 +22,7 @@ final class LocalDictateModel: ObservableObject {
     @Published var selectedTemplateID: UUID {
         didSet { defaults.set(selectedTemplateID.uuidString, forKey: DefaultsKey.selectedTemplateID) }
     }
-    @Published var insertionMode: InsertionMode {
-        didSet { defaults.set(insertionMode.rawValue, forKey: DefaultsKey.insertionMode) }
-    }
+    @Published private(set) var insertionMode: InsertionMode = .autoPaste
     @Published var audioRetention: AudioRetention {
         didSet { defaults.set(audioRetention.rawValue, forKey: DefaultsKey.audioRetention) }
     }
@@ -49,6 +47,7 @@ final class LocalDictateModel: ObservableObject {
     private let hotkeyService = HotkeyService()
     private let defaults: UserDefaults
     private var didLaunch = false
+    private var didOfferAccessibilityForCurrentRecording = false
 
     var selectedTemplate: CleanupTemplate {
         templateStore.template(id: selectedTemplateID)
@@ -66,8 +65,6 @@ final class LocalDictateModel: ObservableObject {
         self.defaults = defaults
         let templateString = defaults.string(forKey: DefaultsKey.selectedTemplateID)
         selectedTemplateID = templateString.flatMap(UUID.init(uuidString:)) ?? CleanupTemplate.cleanDictationID
-        let insertionString = defaults.string(forKey: DefaultsKey.insertionMode)
-        insertionMode = insertionString.flatMap(InsertionMode.init(rawValue:)) ?? .autoPaste
         let retentionString = defaults.string(forKey: DefaultsKey.audioRetention)
         audioRetention = retentionString.flatMap(AudioRetention.init(rawValue:)) ?? .off
         selectedAudioInputDeviceID = defaults.string(forKey: DefaultsKey.selectedAudioInputDeviceID) ?? AudioInputDeviceChoice.systemDefaultID
@@ -113,17 +110,23 @@ final class LocalDictateModel: ObservableObject {
         }
     }
 
-    func requestAccessibility() {
+    @discardableResult
+    func requestAccessibility() -> PermissionState {
         let state = PermissionService.requestAccessibilityPrompt()
         permissions = PermissionService.snapshot()
 
         guard state != .granted else {
             permissionNotice = nil
-            return
+            return state
         }
 
         permissionNotice = "Enable LocalDictate in Privacy & Security > Accessibility, then return here and refresh."
-        PermissionService.openAccessibilitySettings()
+        Task { @MainActor in
+            if PermissionService.confirmOpenAccessibilitySettings() {
+                PermissionService.openAccessibilitySettings()
+            }
+        }
+        return state
     }
 
     func toggleRecording() {
@@ -148,17 +151,29 @@ final class LocalDictateModel: ObservableObject {
 
     func startRecording() {
         latestError = nil
-        liveTranscript = ""
-        cleanedText = ""
-        speechDebugEvents.removeAll()
+        didOfferAccessibilityForCurrentRecording = false
 
-        guard PermissionService.microphoneState() == .granted else {
-            status = .error
-            latestError = "Microphone permission is required."
-            return
-        }
+        Task { @MainActor in
+            let permissionSetup = await ensureRecordingPermissions()
+            guard permissionSetup.allGranted else {
+                return
+            }
 
-        Task {
+            guard await ensureAccessibilityForAutoPasteIfNeeded() else {
+                return
+            }
+
+            if permissionSetup.permissionsWereRequested {
+                status = .error
+                latestError = "Permissions were updated. Press ⌘D again to start recording."
+                await refreshSystemState()
+                return
+            }
+
+            liveTranscript = ""
+            cleanedText = ""
+            speechDebugEvents.removeAll()
+
             do {
                 activeAudioURL = try await recorder.startRecording(
                     inputDeviceID: selectedAudioInputDeviceID,
@@ -301,11 +316,103 @@ final class LocalDictateModel: ObservableObject {
             latestError = fallbackWarning
             status = .inserted
         case .copiedAccessibilityMissing:
-            latestError = "Enable Accessibility permission for automatic paste. Text is ready in LocalDictate."
+            let accessibilityState = if didOfferAccessibilityForCurrentRecording {
+                PermissionService.accessibilityState()
+            } else {
+                requestAccessibility()
+            }
+            latestError = if accessibilityState == .granted {
+                "Accessibility permission is enabled. Text was copied this time; the next dictation can auto-paste."
+            } else {
+                "Enable Accessibility permission for automatic paste. Text is ready in LocalDictate."
+            }
             status = .ready
         case .noEditableTextField:
             latestError = "No editable text field is focused. Text is ready in LocalDictate."
             status = .ready
+        }
+    }
+
+    private func ensureAccessibilityForAutoPasteIfNeeded() async -> Bool {
+        guard insertionMode == .autoPaste else {
+            didOfferAccessibilityForCurrentRecording = false
+            return true
+        }
+
+        guard PermissionService.accessibilityState() != .granted else {
+            didOfferAccessibilityForCurrentRecording = false
+            return true
+        }
+
+        didOfferAccessibilityForCurrentRecording = true
+        _ = requestAccessibility()
+        status = .error
+        latestError = "Accessibility permission updated. Press ⌘D again to start recording."
+        await refreshSystemState()
+        return false
+    }
+
+    private func ensureRecordingPermissions() async -> (allGranted: Bool, permissionsWereRequested: Bool) {
+        let microphoneResult = await resolveMicrophonePermission()
+        let speechResult = await resolveSpeechPermission()
+        let permissionsWereRequested = microphoneResult.requested || speechResult.requested
+
+        guard microphoneResult.state == .granted else {
+            status = .error
+            latestError = permissionError(
+                permissionName: "Microphone",
+                state: microphoneResult.state,
+                settingsPath: "System Settings > Privacy & Security > Microphone"
+            )
+            await refreshSystemState()
+            return (allGranted: false, permissionsWereRequested: permissionsWereRequested)
+        }
+
+        guard speechResult.state == .granted else {
+            status = .error
+            latestError = permissionError(
+                permissionName: "Speech Recognition",
+                state: speechResult.state,
+                settingsPath: "System Settings > Privacy & Security > Speech Recognition"
+            )
+            await refreshSystemState()
+            return (allGranted: false, permissionsWereRequested: permissionsWereRequested)
+        }
+
+        await refreshSystemState()
+        return (allGranted: true, permissionsWereRequested: permissionsWereRequested)
+    }
+
+    private func resolveMicrophonePermission() async -> (state: PermissionState, requested: Bool) {
+        let state = PermissionService.microphoneState()
+        guard state == .notDetermined else {
+            return (state, false)
+        }
+
+        return (await PermissionService.requestMicrophone(), true)
+    }
+
+    private func resolveSpeechPermission() async -> (state: PermissionState, requested: Bool) {
+        let state = PermissionService.speechState()
+        guard state == .notDetermined else {
+            return (state, false)
+        }
+
+        return (await PermissionService.requestSpeech(), true)
+    }
+
+    private func permissionError(permissionName: String, state: PermissionState, settingsPath: String) -> String {
+        switch state {
+        case .denied:
+            "\(permissionName) permission was denied. Enable it in \(settingsPath)."
+        case .restricted:
+            "\(permissionName) permission is restricted by macOS or device policy."
+        case .notDetermined:
+            "\(permissionName) permission is required before recording can start."
+        case .unknown:
+            "\(permissionName) permission state is unknown. Check \(settingsPath)."
+        case .granted:
+            "\(permissionName) permission is granted."
         }
     }
 
@@ -319,7 +426,6 @@ final class LocalDictateModel: ObservableObject {
 
 private enum DefaultsKey {
     static let selectedTemplateID = "selectedTemplateID"
-    static let insertionMode = "insertionMode"
     static let audioRetention = "audioRetention"
     static let selectedAudioInputDeviceID = "selectedAudioInputDeviceID"
     static let selectedLocaleIdentifier = "selectedLocaleIdentifier"
