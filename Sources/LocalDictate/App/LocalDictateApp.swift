@@ -3,6 +3,7 @@ import LocalDictateCore
 import SwiftUI
 
 @main
+@MainActor
 struct LocalDictateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model: LocalDictateModel
@@ -16,14 +17,11 @@ struct LocalDictateApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra("A", systemImage: "text.cursor") {
             MenuBarContentView()
                 .environmentObject(model)
                 .tint(.blue)
                 .accentColor(.blue)
-        } label: {
-            Label("A", systemImage: "text.cursor")
-                .foregroundStyle(model.status.tint)
         }
         .menuBarExtraStyle(.window)
 
