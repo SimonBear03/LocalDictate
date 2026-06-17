@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "LocalDictate",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v15)
     ],
     products: [
         .library(name: "LocalDictateCore", targets: ["LocalDictateCore"]),
@@ -33,4 +33,3 @@ let package = Package(
         )
     ]
 )
-

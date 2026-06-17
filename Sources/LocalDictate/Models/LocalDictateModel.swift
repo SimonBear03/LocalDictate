@@ -13,6 +13,7 @@ final class LocalDictateModel: ObservableObject {
     @Published var latestError: String?
     @Published var activeAudioURL: URL?
     @Published var lastAudioDiagnostics: AudioRecordingDiagnostics?
+    @Published var lastInsertionDiagnostics: InsertionDiagnostics?
     @Published var audioInputDevices: [AudioInputDeviceChoice] = [.systemDefault]
     @Published var selectedSidebarSection: SidebarSection? = .history
     @Published var hotkeyDescription = "⌘D"
@@ -47,6 +48,7 @@ final class LocalDictateModel: ObservableObject {
     private let insertionService = InsertionService()
     private let hotkeyService = HotkeyService()
     private let defaults: UserDefaults
+    private var didLaunch = false
 
     var selectedTemplate: CleanupTemplate {
         templateStore.template(id: selectedTemplateID)
@@ -54,6 +56,10 @@ final class LocalDictateModel: ObservableObject {
 
     var selectedLocale: Locale {
         Locale(identifier: selectedLocaleIdentifier)
+    }
+
+    var latestText: String {
+        DictationTextSelection.preferredText(rawTranscript: liveTranscript, cleanedText: cleanedText)
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -70,6 +76,8 @@ final class LocalDictateModel: ObservableObject {
     }
 
     func launch() {
+        guard !didLaunch else { return }
+        didLaunch = true
         historyStore.load()
         templateStore.load()
         registerGlobalHotkey()
@@ -211,7 +219,7 @@ final class LocalDictateModel: ObservableObject {
 
     func insertLatest() {
         do {
-            applyInsertionResult(try insertionService.insertOrCopy(cleanedText, mode: insertionMode))
+            applyInsertionOutcome(try insertionService.insertOrCopy(latestText, mode: insertionMode))
         } catch {
             latestError = error.localizedDescription
             status = .error
@@ -226,37 +234,51 @@ final class LocalDictateModel: ObservableObject {
                 cleanedText = try await cleanupService.clean(text: liveTranscript, template: selectedTemplate)
                 status = .ready
             } catch {
-                cleanedText = liveTranscript
-                latestError = error.localizedDescription
+                cleanedText = ""
+                latestError = "Cleanup failed. Raw transcript is ready: \(error.localizedDescription)"
                 status = .ready
             }
         }
     }
 
     private func processRecording(_ recording: AudioRecordingResult) async {
+        let transcript = recording.transcript
+        liveTranscript = transcript.text
+
+        let shouldKeepAudio = audioRetention == .manualDelete && recording.url != nil
+        if !shouldKeepAudio, let url = recording.url {
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        status = .cleaning
+        var cleanupWarning: String?
+        let cleaned: String
         do {
-            let transcript = recording.transcript
-            liveTranscript = transcript.text
-
-            status = .cleaning
-            let cleaned = try await cleanupService.clean(text: transcript.text, template: selectedTemplate)
+            cleaned = try await cleanupService.clean(text: transcript.text, template: selectedTemplate)
             cleanedText = cleaned
+        } catch {
+            cleaned = ""
+            cleanedText = ""
+            cleanupWarning = "Cleanup failed. Raw transcript is ready: \(error.localizedDescription)"
+        }
 
-            let shouldKeepAudio = audioRetention == .manualDelete && recording.url != nil
-            if !shouldKeepAudio, let url = recording.url {
-                try? FileManager.default.removeItem(at: url)
-            }
-            let record = DictationRecord(
-                targetAppName: TargetAppService.frontmostAppName(),
-                rawTranscript: transcript.text,
-                cleanedText: cleaned,
-                templateID: selectedTemplate.id,
-                templateName: selectedTemplate.name,
-                languageIdentifier: transcript.languageIdentifier,
-                audioFileName: shouldKeepAudio ? recording.url?.lastPathComponent : nil
+        let record = DictationRecord(
+            targetAppName: TargetAppService.frontmostAppName(),
+            rawTranscript: transcript.text,
+            cleanedText: cleaned,
+            templateID: selectedTemplate.id,
+            templateName: selectedTemplate.name,
+            languageIdentifier: transcript.languageIdentifier,
+            audioFileName: shouldKeepAudio ? recording.url?.lastPathComponent : nil
+        )
+        historyStore.add(record)
+
+        do {
+            let insertionText = DictationTextSelection.preferredText(rawTranscript: transcript.text, cleanedText: cleaned)
+            applyInsertionOutcome(
+                try insertionService.insertOrCopy(insertionText, mode: insertionMode),
+                fallbackWarning: cleanupWarning
             )
-            historyStore.add(record)
-            applyInsertionResult(try insertionService.insertOrCopy(cleaned, mode: insertionMode))
         } catch {
             status = .error
             latestError = error.localizedDescription
@@ -265,15 +287,18 @@ final class LocalDictateModel: ObservableObject {
         await refreshSystemState()
     }
 
-    private func applyInsertionResult(_ result: InsertionResult) {
-        switch result {
+    private func applyInsertionOutcome(_ outcome: InsertionOutcome, fallbackWarning: String? = nil) {
+        lastInsertionDiagnostics = outcome.diagnostics
+
+        switch outcome.result {
         case .empty:
             status = .ready
+            latestError = fallbackWarning
         case .copied:
-            latestError = nil
+            latestError = fallbackWarning
             status = .ready
         case .pasted:
-            latestError = nil
+            latestError = fallbackWarning
             status = .inserted
         case .copiedAccessibilityMissing:
             latestError = "Enable Accessibility permission for automatic paste. Text is ready in LocalDictate."

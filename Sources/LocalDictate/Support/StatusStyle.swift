@@ -18,8 +18,8 @@ extension DictationStatus {
         switch self {
         case .idle: .secondary
         case .listening: .red
-        case .transcribing: .secondary
-        case .cleaning: .secondary
+        case .transcribing: .blue
+        case .cleaning: .teal
         case .ready: .green
         case .inserted: .green
         case .error: .red

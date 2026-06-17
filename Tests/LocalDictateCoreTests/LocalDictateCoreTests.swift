@@ -8,6 +8,24 @@ import Testing
     #expect(CleanupTemplate.builtIns.first?.prompt.contains("Do not rewrite") == true)
 }
 
+@Test func dictationTextSelectionUsesCleanedTextWhenAvailable() {
+    let text = DictationTextSelection.preferredText(
+        rawTranscript: "raw transcript",
+        cleanedText: " cleaned transcript "
+    )
+
+    #expect(text == "cleaned transcript")
+}
+
+@Test func dictationTextSelectionFallsBackToRawTranscriptWhenCleanupMissing() {
+    let text = DictationTextSelection.preferredText(
+        rawTranscript: " raw transcript ",
+        cleanedText: "   "
+    )
+
+    #expect(text == "raw transcript")
+}
+
 @Test func dictationStatusTitlesAreReadable() {
     #expect(DictationStatus.idle.title == "Idle")
     #expect(DictationStatus.listening.menuTitle.contains("Listening"))

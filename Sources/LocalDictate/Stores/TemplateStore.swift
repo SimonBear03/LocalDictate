@@ -32,6 +32,17 @@ final class TemplateStore: ObservableObject {
         save()
     }
 
+    func delete(_ template: CleanupTemplate) {
+        guard !template.isBuiltIn else {
+            return
+        }
+        templates.removeAll { $0.id == template.id }
+        if templates.isEmpty {
+            templates = CleanupTemplate.builtIns
+        }
+        save()
+    }
+
     private func save() {
         do {
             let url = try AppPaths.templatesFileURL()

@@ -1,11 +1,12 @@
 # LocalDictate
 
-LocalDictate is a local-first voice typing app for Mac. It is designed as a native macOS menu bar app with real windows for history, templates, privacy, settings, and diagnostics.
+LocalDictate is a local-first voice typing app for Mac. It is designed as a native macOS app with a menu-bar extra and real windows for history, templates, privacy, settings, and diagnostics.
 
 ## Current State
 
 This is the current runnable native macOS app:
 
+- Minimum supported macOS version: macOS 15
 - Menu bar status and recording controls
 - Main SwiftUI window with History, Templates, Settings, Privacy, and Diagnostics
 - Native macOS sidebar, grouped forms, toolbar controls, group boxes, and menu-bar popover styling
@@ -30,7 +31,7 @@ This is the current runnable native macOS app:
 ./script/build_and_run.sh
 ```
 
-The script builds with Xcode's toolchain, installs `~/Applications/LocalDictate.app`, ad-hoc signs it with the project entitlements, and opens it as a menu bar app. Keeping one stable installed app bundle avoids duplicate Spotlight entries and reduces repeated macOS permission prompts after rebuilds.
+The script builds with Xcode's toolchain, installs `~/Applications/LocalDictate.app`, ad-hoc signs it with the project entitlements, and opens it as a regular macOS app with a menu-bar extra. Keeping one stable installed app bundle avoids duplicate Spotlight entries and reduces repeated macOS permission prompts after rebuilds.
 
 Optional modes:
 
@@ -43,7 +44,7 @@ Optional modes:
 ## Test
 
 ```bash
-xcrun swift test
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test
 ```
 
 ## V1 Boundaries

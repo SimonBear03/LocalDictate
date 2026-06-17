@@ -4,7 +4,7 @@ set -euo pipefail
 MODE="${1:-run}"
 APP_NAME="LocalDictate"
 BUNDLE_ID="com.simonbear.localdictate"
-MIN_SYSTEM_VERSION="14.0"
+MIN_SYSTEM_VERSION="15.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="${LOCALDICTATE_INSTALL_DIR:-$HOME/Applications}"
@@ -54,8 +54,6 @@ cat >"$INFO_PLIST" <<PLIST
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
-  <key>LSUIElement</key>
-  <true/>
   <key>NSHumanReadableCopyright</key>
   <string>Copyright © 2026 Simon Chen. All rights reserved.</string>
   <key>NSMicrophoneUsageDescription</key>
@@ -91,8 +89,20 @@ case "$MODE" in
     ;;
   --verify|verify)
     open_app
-    sleep 1
-    pgrep -x "$APP_NAME" >/dev/null
+    for _ in {1..20}; do
+      while read -r pid; do
+        [ -n "$pid" ] || continue
+        command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+        if [[ "$command" == "$APP_BINARY"* ]]; then
+          echo "Verified $APP_BINARY is running as pid $pid"
+          exit 0
+        fi
+      done < <(pgrep -x "$APP_NAME" 2>/dev/null || true)
+      sleep 0.25
+    done
+    echo "error: $APP_BINARY is not running after launch" >&2
+    pgrep -fl "$APP_NAME" >&2 || true
+    exit 1
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2

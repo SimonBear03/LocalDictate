@@ -34,6 +34,35 @@ struct DiagnosticsView: View {
             }
             .systemGroupedRowSurface()
 
+            Section("Insertion") {
+                if let diagnostics = model.lastInsertionDiagnostics {
+                    LabeledContent("Result", value: diagnostics.result.title)
+                    LabeledContent("Mode", value: diagnostics.mode.title)
+                    LabeledContent("Characters", value: "\(diagnostics.characters)")
+                    LabeledContent("Target App", value: diagnostics.frontmostAppName)
+                    LabeledContent("Accessibility", value: diagnostics.accessibilityTrusted ? "Trusted" : "Not Trusted")
+                    if let focusSource = diagnostics.focusSource {
+                        LabeledContent("Focus Source", value: focusSource)
+                    }
+                    if let focusReason = diagnostics.focusReason {
+                        LabeledContent("Focus Reason", value: focusReason)
+                    }
+                    if let focusRole = diagnostics.focusRole {
+                        LabeledContent("Role", value: focusRole)
+                    }
+                    if let focusSubrole = diagnostics.focusSubrole {
+                        LabeledContent("Subrole", value: focusSubrole)
+                    }
+                    if let focusValueSettable = diagnostics.focusValueSettable {
+                        LabeledContent("Value Settable", value: focusValueSettable ? "Yes" : "No")
+                    }
+                } else {
+                    Text("No insertion attempt has been inspected yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .systemGroupedRowSurface()
+
             Section("Audio Input") {
                 LabeledContent("Selected Input", value: AudioInputDeviceService.displayName(for: model.selectedAudioInputDeviceID))
                 if let diagnostics = model.lastAudioDiagnostics {

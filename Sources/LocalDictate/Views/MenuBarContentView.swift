@@ -4,14 +4,13 @@ import SwiftUI
 struct MenuBarContentView: View {
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var model: LocalDictateModel
-    @State private var transcriptContentHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             statusHeader
 
             if !model.liveTranscript.isEmpty || !model.cleanedText.isEmpty {
-                transcriptPreview
+                transcriptPreviews
             }
 
             if let latestError = model.latestError {
@@ -52,6 +51,7 @@ struct MenuBarContentView: View {
         .frame(width: 340)
         .systemWindowSurface()
         .task {
+            model.launch()
             await model.refreshSystemState()
         }
     }
@@ -77,42 +77,16 @@ struct MenuBarContentView: View {
         }
     }
 
-    private var transcriptPreview: some View {
-        GroupBox(model.cleanedText.isEmpty ? "Transcript" : "Cleaned Text") {
-            ScrollView {
-                Text(transcriptText)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 2)
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: TranscriptContentHeightKey.self,
-                                value: proxy.size.height
-                            )
-                        }
-                    }
+    private var transcriptPreviews: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !model.liveTranscript.isEmpty {
+                TranscriptPreviewBox(title: "Raw Transcript", text: model.liveTranscript)
             }
-            .frame(height: transcriptBoxHeight, alignment: .top)
-            .onPreferenceChange(TranscriptContentHeightKey.self) { height in
-                transcriptContentHeight = height
+            if !model.cleanedText.isEmpty {
+                TranscriptPreviewBox(title: "Cleaned Text", text: model.cleanedText)
             }
         }
     }
-
-    private var transcriptText: String {
-        model.cleanedText.isEmpty ? model.liveTranscript : model.cleanedText
-    }
-
-    private var transcriptBoxHeight: CGFloat {
-        let contentHeight = transcriptContentHeight > 0 ? transcriptContentHeight : Self.minimumTranscriptBoxHeight
-        return min(max(contentHeight, Self.minimumTranscriptBoxHeight), Self.maximumTranscriptBoxHeight)
-    }
-
-    private static let minimumTranscriptBoxHeight: CGFloat = 42
-    private static let maximumTranscriptBoxHeight: CGFloat = 176
 
     private var statusDetail: String {
         switch model.status {
@@ -120,18 +94,29 @@ struct MenuBarContentView: View {
         case .listening: "Recording from the selected microphone."
         case .transcribing: "Converting speech to text locally."
         case .cleaning: "Cleaning text with the selected template."
-        case .ready: "Cleaned text is ready."
+        case .ready: "Text is ready."
         case .inserted: "Text was pasted into the target app."
         case .error: "Open diagnostics for details."
         }
     }
 }
 
-private struct TranscriptContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
+private struct TranscriptPreviewBox: View {
+    var title: String
+    var text: String
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+    var body: some View {
+        GroupBox(title) {
+            ScrollView {
+                Text(text)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 2)
+            }
+            .frame(minHeight: 40, maxHeight: 132, alignment: .top)
+        }
     }
 }
 

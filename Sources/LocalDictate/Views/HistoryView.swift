@@ -4,76 +4,133 @@ import SwiftUI
 struct HistoryView: View {
     @ObservedObject var store: HistoryStore
     @State private var selectedRecordID: DictationRecord.ID?
+    @State private var searchText = ""
+
+    private var filteredRecords: [DictationRecord] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return store.records
+        }
+
+        return store.records.filter {
+            $0.searchableText.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     private var selectedRecord: DictationRecord? {
-        store.records.first { $0.id == selectedRecordID } ?? store.records.first
+        filteredRecords.first { $0.id == selectedRecordID } ?? filteredRecords.first
     }
 
     var body: some View {
         HSplitView {
-            List(store.records, selection: $selectedRecordID) { record in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(record.cleanedText.isEmpty ? record.rawTranscript : record.cleanedText)
-                        .font(.headline)
-                        .lineLimit(2)
-                    Text("\(record.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(record.templateName)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .padding(.vertical, 4)
-                .tag(record.id)
-            }
-            .frame(minWidth: 280, idealWidth: 330)
-            .systemSidebarSurface()
+            HistoryListPane(
+                records: filteredRecords,
+                selectedRecordID: $selectedRecordID,
+                deleteRecord: store.delete
+            )
 
             Group {
                 if let selectedRecord {
-                    HistoryDetailView(record: selectedRecord) {
-                        store.delete(selectedRecord)
-                    }
+                    HistoryDetailView(record: selectedRecord)
                 } else {
-                    ContentUnavailableView("No Dictations", systemImage: "text.bubble", description: Text("Record a dictation from the menu bar to build local history."))
+                    ContentUnavailableView(
+                        searchText.isEmpty ? "No Dictations" : "No Results",
+                        systemImage: "text.bubble",
+                        description: Text(searchText.isEmpty ? "Record a dictation from the menu bar to build local history." : "Try a different search.")
+                    )
                 }
             }
-            .frame(minWidth: 420)
+            .frame(minWidth: 320)
             .systemWindowSurface()
         }
         .systemWindowSurface()
         .navigationTitle("History")
-        .toolbar {
-            ToolbarItem {
-                Button("Clear History", role: .destructive) {
-                    store.deleteAll()
-                }
-                .disabled(store.records.isEmpty)
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search History")
+        .onAppear(perform: ensureSelectedRecordIsVisible)
+        .onChange(of: filteredRecords.map(\.id)) { _, _ in
+            ensureSelectedRecordIsVisible()
+        }
+    }
+
+    private func ensureSelectedRecordIsVisible() {
+        guard !filteredRecords.isEmpty else {
+            selectedRecordID = nil
+            return
+        }
+        if selectedRecordID == nil || !filteredRecords.contains(where: { $0.id == selectedRecordID }) {
+            selectedRecordID = filteredRecords.first?.id
+        }
+    }
+}
+
+private struct HistoryListPane: View {
+    var records: [DictationRecord]
+    @Binding var selectedRecordID: DictationRecord.ID?
+    var deleteRecord: (DictationRecord) -> Void
+
+    var body: some View {
+        List(selection: $selectedRecordID) {
+            ForEach(records) { record in
+                HistoryListRow(record: record)
+                    .tag(record.id)
+                    .contextMenu {
+                        Button("Delete", role: .destructive) {
+                            deleteRecord(record)
+                        }
+                    }
+            }
+        }
+        .listStyle(.plain)
+        .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+        .overlay {
+            if records.isEmpty {
+                ContentUnavailableView(
+                    "No Results",
+                    systemImage: "text.bubble",
+                    description: Text("Try a different search.")
+                )
             }
         }
     }
 }
 
+private struct HistoryListRow: View {
+    var record: DictationRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(record.previewText)
+                .font(.headline)
+                .lineLimit(2)
+            Text("\(record.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(record.targetAppName)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
 private struct HistoryDetailView: View {
     var record: DictationRecord
-    var onDelete: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(record.createdAt.formatted(date: .complete, time: .shortened))
-                            .font(.title3.weight(.semibold))
-                        Text("\(record.targetAppName) · \(record.languageIdentifier)")
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Delete", role: .destructive, action: onDelete)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(record.createdAt.formatted(date: .complete, time: .shortened))
+                        .font(.title3.weight(.semibold))
+                    Text("\(record.targetAppName) · \(record.templateName) · \(record.languageIdentifier)")
+                        .foregroundStyle(.secondary)
                 }
 
-                TextSection(title: "Cleaned Text", text: record.cleanedText)
-                TextSection(title: "Raw Transcript", text: record.rawTranscript)
+                HStack(alignment: .top, spacing: 16) {
+                    TextSection(title: "Raw Transcript", text: record.rawTranscript)
+                    TextSection(title: "Cleaned Text", text: record.cleanedText, emptyText: "No cleaned text")
+                }
             }
             .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .systemWindowSurface()
     }
@@ -82,11 +139,35 @@ private struct HistoryDetailView: View {
 private struct TextSection: View {
     var title: String
     var text: String
+    var emptyText = "No text"
 
     var body: some View {
         GroupBox(title) {
-            Text(text.isEmpty ? "No text" : text)
+            Text(text.isEmpty ? emptyText : text)
+                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
+
+private extension DictationRecord {
+    var previewText: String {
+        let cleaned = cleanedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? rawTranscript : cleaned
+    }
+
+    var searchableText: String {
+        [
+            rawTranscript,
+            cleanedText,
+            targetAppName,
+            templateName,
+            languageIdentifier,
+            createdAt.formatted(date: .abbreviated, time: .shortened),
+            createdAt.formatted(date: .complete, time: .shortened)
+        ]
+        .joined(separator: " ")
     }
 }

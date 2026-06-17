@@ -5,7 +5,15 @@ import SwiftUI
 @main
 struct LocalDictateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = LocalDictateModel()
+    @StateObject private var model: LocalDictateModel
+
+    init() {
+        let model = LocalDictateModel()
+        _model = StateObject(wrappedValue: model)
+        Task { @MainActor [model] in
+            model.launch()
+        }
+    }
 
     var body: some Scene {
         MenuBarExtra {
@@ -14,7 +22,8 @@ struct LocalDictateApp: App {
                 .tint(.blue)
                 .accentColor(.blue)
         } label: {
-            Label(model.status.title, systemImage: model.status.systemImage)
+            Label("A", systemImage: "text.cursor")
+                .foregroundStyle(model.status.tint)
         }
         .menuBarExtraStyle(.window)
 
@@ -24,12 +33,13 @@ struct LocalDictateApp: App {
                 .tint(.blue)
                 .accentColor(.blue)
                 .configuredAppWindowAppearance()
-                .frame(minWidth: 880, minHeight: 580)
+                .frame(minWidth: 1040, minHeight: 620)
                 .task {
                     model.launch()
                 }
         }
-        .defaultSize(width: 980, height: 680)
+        .defaultSize(width: 1120, height: 720)
+        .defaultLaunchBehavior(.presented)
         .commands {
             CommandGroup(after: .newItem) {
                 Button(model.status == .listening ? "Stop Recording" : "Start Recording") {
@@ -43,11 +53,10 @@ struct LocalDictateApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        WindowFocusService.activateApp()
+        WindowFocusService.focusMainWindow()
         return true
     }
 }

@@ -14,18 +14,53 @@ enum InsertionResult: Sendable {
     case pasted
     case copiedAccessibilityMissing
     case noEditableTextField
+
+    var title: String {
+        switch self {
+        case .empty: "Empty"
+        case .copied: "Copied"
+        case .pasted: "Pasted"
+        case .copiedAccessibilityMissing: "Copied - Accessibility Missing"
+        case .noEditableTextField: "No Editable Text Field"
+        }
+    }
+}
+
+struct InsertionOutcome: Sendable {
+    var result: InsertionResult
+    var diagnostics: InsertionDiagnostics
+}
+
+struct InsertionDiagnostics: Sendable {
+    var result: InsertionResult
+    var mode: InsertionMode
+    var characters: Int
+    var frontmostAppName: String
+    var accessibilityTrusted: Bool
+    var focusSource: String?
+    var focusReason: String?
+    var focusRole: String?
+    var focusSubrole: String?
+    var focusValueSettable: Bool?
 }
 
 final class InsertionService {
-    func insertOrCopy(_ text: String, mode: InsertionMode) throws -> InsertionResult {
+    func insertOrCopy(_ text: String, mode: InsertionMode) throws -> InsertionOutcome {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let frontmostAppName = TargetAppService.frontmostAppName()
         guard !trimmed.isEmpty else {
             insertionLogger.info("insertion skipped reason=empty")
-            return .empty
+            return outcome(
+                result: .empty,
+                mode: mode,
+                characters: 0,
+                frontmostAppName: frontmostAppName,
+                accessibilityTrusted: AXIsProcessTrusted()
+            )
         }
 
         insertionLogger.info(
-            "insertion requested mode=\(mode.rawValue, privacy: .public) chars=\(trimmed.count, privacy: .public) frontmost=\(TargetAppService.frontmostAppName(), privacy: .public)"
+            "insertion requested mode=\(mode.rawValue, privacy: .public) chars=\(trimmed.count, privacy: .public) frontmost=\(frontmostAppName, privacy: .public)"
         )
 
         let pasteboard = NSPasteboard.general
@@ -33,12 +68,25 @@ final class InsertionService {
             pasteboard.clearContents()
             pasteboard.setString(trimmed, forType: .string)
             insertionLogger.info("insertion completed result=copied chars=\(trimmed.count, privacy: .public)")
-            return .copied
+            return outcome(
+                result: .copied,
+                mode: mode,
+                characters: trimmed.count,
+                frontmostAppName: frontmostAppName,
+                accessibilityTrusted: AXIsProcessTrusted()
+            )
         }
 
-        guard AXIsProcessTrusted() else {
+        let accessibilityTrusted = AXIsProcessTrusted()
+        guard accessibilityTrusted else {
             insertionLogger.warning("insertion blocked result=accessibilityMissing")
-            return .copiedAccessibilityMissing
+            return outcome(
+                result: .copiedAccessibilityMissing,
+                mode: mode,
+                characters: trimmed.count,
+                frontmostAppName: frontmostAppName,
+                accessibilityTrusted: false
+            )
         }
 
         let focusStatus = focusedElementTextInputStatus()
@@ -47,7 +95,14 @@ final class InsertionService {
         )
 
         guard focusStatus.allowsPaste else {
-            return .noEditableTextField
+            return outcome(
+                result: .noEditableTextField,
+                mode: mode,
+                characters: trimmed.count,
+                frontmostAppName: frontmostAppName,
+                accessibilityTrusted: true,
+                focusStatus: focusStatus
+            )
         }
 
         let previousPasteboard = PasteboardSnapshot.capture(from: pasteboard)
@@ -55,14 +110,46 @@ final class InsertionService {
         pasteboard.setString(trimmed, forType: .string)
         postCommandV()
         insertionLogger.info(
-            "insertion completed result=pasted chars=\(trimmed.count, privacy: .public) frontmost=\(TargetAppService.frontmostAppName(), privacy: .public) focusConfirmed=\(focusStatus.acceptsText, privacy: .public)"
+            "insertion completed result=pasted chars=\(trimmed.count, privacy: .public) frontmost=\(frontmostAppName, privacy: .public) focusConfirmed=\(focusStatus.acceptsText, privacy: .public)"
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             previousPasteboard.restore(to: pasteboard)
             insertionLogger.debug("pasteboard restored after automatic paste")
         }
-        return .pasted
+        return outcome(
+            result: .pasted,
+            mode: mode,
+            characters: trimmed.count,
+            frontmostAppName: frontmostAppName,
+            accessibilityTrusted: true,
+            focusStatus: focusStatus
+        )
+    }
+
+    private func outcome(
+        result: InsertionResult,
+        mode: InsertionMode,
+        characters: Int,
+        frontmostAppName: String,
+        accessibilityTrusted: Bool,
+        focusStatus: FocusedTextInputStatus? = nil
+    ) -> InsertionOutcome {
+        InsertionOutcome(
+            result: result,
+            diagnostics: InsertionDiagnostics(
+                result: result,
+                mode: mode,
+                characters: characters,
+                frontmostAppName: frontmostAppName,
+                accessibilityTrusted: accessibilityTrusted,
+                focusSource: focusStatus?.source,
+                focusReason: focusStatus?.reason,
+                focusRole: focusStatus?.role,
+                focusSubrole: focusStatus?.subrole,
+                focusValueSettable: focusStatus?.isValueSettable
+            )
+        )
     }
 
     private func focusedElementTextInputStatus() -> FocusedTextInputStatus {

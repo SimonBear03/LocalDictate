@@ -4,75 +4,213 @@ import SwiftUI
 struct TemplatesView: View {
     @ObservedObject var store: TemplateStore
     @Binding var selectedTemplateID: UUID
-    @State private var selectedTemplateListID: CleanupTemplate.ID?
+    @State private var selectedListTemplateID: UUID?
+    @State private var searchText = ""
+
+    private var filteredTemplates: [CleanupTemplate] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return store.templates
+        }
+
+        return store.templates.filter {
+            $0.searchableText.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var effectiveSelectedTemplateID: UUID? {
+        if let selectedListTemplateID, filteredTemplates.contains(where: { $0.id == selectedListTemplateID }) {
+            return selectedListTemplateID
+        }
+        if filteredTemplates.contains(where: { $0.id == selectedTemplateID }) {
+            return selectedTemplateID
+        }
+        return filteredTemplates.first?.id
+    }
 
     private var selectedTemplate: CleanupTemplate? {
-        store.templates.first { $0.id == selectedTemplateListID } ?? store.templates.first { $0.id == selectedTemplateID } ?? store.templates.first
+        guard let effectiveSelectedTemplateID else {
+            return filteredTemplates.first
+        }
+        return filteredTemplates.first { $0.id == effectiveSelectedTemplateID } ?? filteredTemplates.first
     }
 
     var body: some View {
         HSplitView {
-            List(store.templates, selection: $selectedTemplateListID) { template in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(template.name)
-                        .font(.headline)
-                    Text(template.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .padding(.vertical, 4)
-                .tag(template.id)
+            TemplateListPane(
+                templates: filteredTemplates,
+                selectedTemplateID: effectiveSelectedTemplateID,
+                defaultTemplateID: selectedTemplateID,
+                deleteTemplate: store.delete
+            ) { templateID in
+                selectedListTemplateID = templateID
             }
-            .frame(minWidth: 260, idealWidth: 320)
-            .systemSidebarSurface()
 
-            if let selectedTemplate {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(selectedTemplate.name)
-                                .font(.title2.weight(.semibold))
-                            Text(selectedTemplate.summary)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(selectedTemplate.id == selectedTemplateID ? "Default" : "Use Template") {
-                            selectedTemplateID = selectedTemplate.id
-                        }
-                        .disabled(selectedTemplate.id == selectedTemplateID)
+            Group {
+                if let selectedTemplate {
+                    TemplateDetailView(
+                        template: selectedTemplate,
+                        isDefault: selectedTemplate.id == selectedTemplateID
+                    ) {
+                        selectedTemplateID = selectedTemplate.id
                     }
-
-                    Text("Prompt")
-                        .font(.headline)
-                    ScrollView {
-                        Text(selectedTemplate.prompt)
-                            .font(.body.monospaced())
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                    }
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(.quaternary)
-                    )
-                        .frame(minHeight: 260)
-
-                    Text("The default cleanup prompt is read-only in this first pass. It is intentionally conservative and avoids rewriting your wording.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                } else {
+                    ContentUnavailableView("No Templates", systemImage: "text.badge.star")
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .systemWindowSurface()
-            } else {
-                ContentUnavailableView("No Templates", systemImage: "text.badge.star")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .systemWindowSurface()
             }
+            .frame(minWidth: 320)
+            .systemWindowSurface()
         }
         .systemWindowSurface()
         .navigationTitle("Templates")
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search Templates")
+        .onAppear(perform: ensureSelectedTemplateIsVisible)
+        .onChange(of: filteredTemplates.map(\.id)) { _, _ in
+            ensureSelectedTemplateIsVisible()
+        }
+    }
+
+    private func ensureSelectedTemplateIsVisible() {
+        guard !filteredTemplates.isEmpty else {
+            selectedListTemplateID = nil
+            return
+        }
+        if selectedListTemplateID == nil || !filteredTemplates.contains(where: { $0.id == selectedListTemplateID }) {
+            selectedListTemplateID = effectiveSelectedTemplateID ?? filteredTemplates.first?.id
+        }
+    }
+}
+
+private struct TemplateListPane: View {
+    var templates: [CleanupTemplate]
+    var selectedTemplateID: CleanupTemplate.ID?
+    var defaultTemplateID: CleanupTemplate.ID
+    var deleteTemplate: (CleanupTemplate) -> Void
+    var selectTemplate: (CleanupTemplate.ID) -> Void
+
+    var body: some View {
+        List(selection: Binding(
+            get: { selectedTemplateID },
+            set: { newValue in
+                if let newValue {
+                    selectTemplate(newValue)
+                }
+            }
+        )) {
+            ForEach(templates) { template in
+                TemplateListRow(
+                    template: template,
+                    isDefault: template.id == defaultTemplateID
+                )
+                .tag(template.id)
+                .contextMenu {
+                    Button("Delete", role: .destructive) {
+                        deleteTemplate(template)
+                    }
+                    .disabled(template.isBuiltIn)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .frame(minWidth: 260, idealWidth: 300, maxWidth: 360)
+        .overlay {
+            if templates.isEmpty {
+                ContentUnavailableView(
+                    "No Results",
+                    systemImage: "text.badge.star",
+                    description: Text("Try a different search.")
+                )
+            }
+        }
+    }
+}
+
+private struct TemplateListRow: View {
+    var template: CleanupTemplate
+    var isDefault: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(template.name)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                if isDefault {
+                    Text("Default")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(template.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+private struct TemplateDetailView: View {
+    var template: CleanupTemplate
+    var isDefault: Bool
+    var useTemplate: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(template.name)
+                            .font(.title2.weight(.semibold))
+                        Text(template.summary)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if isDefault {
+                        Text("Default")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(.quaternary, in: Capsule())
+                    } else {
+                        Button("Use Template", action: useTemplate)
+                    }
+                }
+
+                GroupBox("Prompt") {
+                    ScrollView {
+                        Text(template.prompt)
+                            .font(.body.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxHeight: 420, alignment: .top)
+                }
+
+                Text("Custom templates and editing are planned for a later V1 pass. The default prompt stays conservative and avoids rewriting wording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(28)
+            .frame(maxWidth: 760, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .systemWindowSurface()
+    }
+}
+
+private extension CleanupTemplate {
+    var searchableText: String {
+        [
+            name,
+            summary,
+            prompt,
+            isBuiltIn ? "built in default" : "custom"
+        ]
+        .joined(separator: " ")
     }
 }

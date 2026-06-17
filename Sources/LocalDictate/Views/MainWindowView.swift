@@ -3,16 +3,17 @@ import SwiftUI
 
 struct MainWindowView: View {
     @EnvironmentObject private var model: LocalDictateModel
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(SidebarSection.allCases, selection: $model.selectedSidebarSection) { section in
                 Label(section.title, systemImage: section.systemImage)
                     .tag(section)
             }
             .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(210)
             .systemSidebarSurface()
-            .navigationTitle("LocalDictate")
         } detail: {
             detailContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -20,31 +21,23 @@ struct MainWindowView: View {
         }
         .systemWindowSurface()
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    model.toggleRecording()
-                } label: {
-                    Label(model.status == .listening ? "Stop Recording" : "Start Recording", systemImage: model.status == .listening ? "stop.fill" : "mic.fill")
+            ToolbarItem(placement: .automatic) {
+                HStack(spacing: 6) {
+                    Button {
+                        model.toggleRecording()
+                    } label: {
+                        Image(systemName: model.status == .listening ? "stop.fill" : "mic.fill")
+                            .font(.callout.weight(.semibold))
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(model.status == .listening ? .red : .primary)
+                    .accessibilityLabel(model.status == .listening ? "Stop Recording" : "Start Recording")
+                    .help(model.status == .listening ? "Stop Recording" : "Start Recording")
+
+                    ToolbarStatusIndicator(status: model.status)
                 }
-                .labelStyle(.iconOnly)
-                .help(model.status == .listening ? "Stop Recording" : "Start Recording")
-
-                Button {
-                    model.insertLatest()
-                } label: {
-                    Label("Insert", systemImage: "arrow.down.doc")
-                }
-                .labelStyle(.iconOnly)
-                .disabled(model.cleanedText.isEmpty)
-                .help("Insert Latest Dictation")
-            }
-
-            if #available(macOS 26.0, *) {
-                ToolbarSpacer(.fixed)
-            }
-
-            ToolbarItem(placement: .primaryAction) {
-                ToolbarStatusBadge(status: model.status)
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
     }
@@ -66,24 +59,17 @@ struct MainWindowView: View {
     }
 }
 
-private struct ToolbarStatusBadge: View {
+private struct ToolbarStatusIndicator: View {
     let status: DictationStatus
 
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: status.systemImage)
-                .imageScale(.medium)
-                .frame(width: 17, alignment: .center)
-
-            Text(status.title)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-        .font(.callout.weight(.semibold))
-        .foregroundStyle(status.tint)
-        .frame(minWidth: 116, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Status, \(status.title)")
-        .help("Status: \(status.title)")
+        Text(status.title)
+            .lineLimit(1)
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(status.tint)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Status, \(status.title)")
+            .help("Status: \(status.title)")
     }
 }
