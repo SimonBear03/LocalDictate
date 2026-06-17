@@ -47,9 +47,36 @@ Optional modes:
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test
 ```
 
+## Fresh Install Verification
+
+For a brand-new machine or first launch after deleting/relocating the app:
+
+1. Remove old copies of LocalDictate from Applications and quit any running instances.
+2. Rebuild and launch only from this path:
+   - `/Users/simon/Applications/LocalDictate.app`
+3. Open the app from Applications (not via `swift run` or the raw `.build` binary).
+4. Open **Privacy** and verify:
+   - `Accessibility` row points to the same app path shown under `Running App`.
+   - `Microphone` and `Speech Recognition` are available after a single `⌘D` permission attempt.
+5. Press `⌘D` once:
+   - the app should stop at first-run permission prompts if needed.
+6. Grant anything requested and press `⌘D` again to start dictation.
+7. In Diagnostics, confirm `Speech`, `Cleanup`, and insertion status are present.
+
+This flow should stay stable as long as you keep using `~/Applications/LocalDictate.app` as the only installed copy.
+
 ## V1 Boundaries
 
 - V1 is Mac-only.
 - V1 is local-only.
 - The local automation API is planned but opt-in and disabled in this scaffold.
 - Custom template editing, configurable hotkeys, floating preview, and modern `DictationTranscriber` input are future implementation steps.
+
+## V1 Completion Notes
+
+- Permission gating now requires explicit user action on each hotkey attempt:
+  - microphone and speech permission prompts run first,
+  - accessibility prompt (auto-paste) is included in the same attempt,
+  - recording starts only after all prompts are already granted and the user presses `⌘D` again.
+- Added explicit identity guidance for Accessibility so duplicate app copies are easier to troubleshoot.
+- Auto-paste is the default insertion mode, with full menu-bar and diagnostics visibility.

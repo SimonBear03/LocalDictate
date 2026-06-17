@@ -120,7 +120,8 @@ final class LocalDictateModel: ObservableObject {
             return state
         }
 
-        permissionNotice = "Enable LocalDictate in Privacy & Security > Accessibility, then return here and refresh."
+        let bundleName = (Bundle.main.bundlePath as NSString).lastPathComponent
+        permissionNotice = "Enable Accessibility for this exact app copy (\(bundleName)) at Privacy & Security > Accessibility. If a duplicate entry exists, remove old copies and keep only this one."
         Task { @MainActor in
             if PermissionService.confirmOpenAccessibilitySettings() {
                 PermissionService.openAccessibilitySettings()
@@ -346,11 +347,11 @@ final class LocalDictateModel: ObservableObject {
 
         didOfferAccessibilityForCurrentRecording = true
         _ = requestAccessibility()
-        status = .error
-        latestError = "Accessibility permission updated. Press ⌘D again to start recording."
-        await refreshSystemState()
-        return false
-    }
+                status = .error
+                latestError = "Accessibility permission updated. Press ⌘D again to start recording."
+                await refreshSystemState()
+                return false
+            }
 
     private func ensureRecordingPermissions() async -> (allGranted: Bool, permissionsWereRequested: Bool) {
         let microphoneResult = await resolveMicrophonePermission()

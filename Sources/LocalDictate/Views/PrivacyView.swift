@@ -44,6 +44,9 @@ struct PrivacyView: View {
                 Text("Accessibility permission must be granted to this exact app copy.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                Text("If Accessibility stays denied after granting, remove old LocalDictate entries from privacy settings and keep only the one matching the path above.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             .systemGroupedRowSurface()
 
