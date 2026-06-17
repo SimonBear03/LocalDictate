@@ -13,7 +13,7 @@ struct SettingsView: View {
                     }
                 }
                 Text("Use system default unless a specific recognition locale is needed.")
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             .systemGroupedRowSurface()
@@ -41,11 +41,11 @@ struct SettingsView: View {
 
                 if let hotkeyError = model.hotkeyError {
                     Text(hotkeyError)
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.orange)
                 } else {
                     Text("Global hotkey is active while LocalDictate is running.")
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
 
@@ -62,7 +62,7 @@ struct SettingsView: View {
                     }
                 }
                 Text("Auto Paste requires Accessibility permission. Copy Only never posts keyboard events.")
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             .systemGroupedRowSurface()
@@ -74,7 +74,7 @@ struct SettingsView: View {
                     }
                 }
                 Text("Text history is saved locally. Audio is discarded by default.")
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             .systemGroupedRowSurface()

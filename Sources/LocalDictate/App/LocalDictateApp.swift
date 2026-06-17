@@ -33,12 +33,12 @@ struct LocalDictateApp: App {
                 .tint(.blue)
                 .accentColor(.blue)
                 .configuredAppWindowAppearance()
-                .frame(minWidth: 1040, minHeight: 620)
+                .frame(minWidth: 720, minHeight: 420)
                 .task {
                     model.launch()
                 }
         }
-        .defaultSize(width: 1120, height: 720)
+        .defaultSize(width: 980, height: 660)
         .defaultLaunchBehavior(.presented)
         .commands {
             CommandGroup(after: .newItem) {

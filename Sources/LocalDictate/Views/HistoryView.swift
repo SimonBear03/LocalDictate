@@ -22,12 +22,14 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             HistoryListPane(
                 records: filteredRecords,
                 selectedRecordID: $selectedRecordID,
                 deleteRecord: store.delete
             )
+
+            Divider()
 
             Group {
                 if let selectedRecord {
@@ -40,7 +42,7 @@ struct HistoryView: View {
                     )
                 }
             }
-            .frame(minWidth: 320)
+            .frame(minWidth: 260, maxWidth: .infinity)
             .systemWindowSurface()
         }
         .systemWindowSurface()
@@ -81,7 +83,7 @@ private struct HistoryListPane: View {
             }
         }
         .listStyle(.plain)
-        .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+        .frame(width: 240)
         .overlay {
             if records.isEmpty {
                 ContentUnavailableView(
@@ -103,7 +105,7 @@ private struct HistoryListRow: View {
                 .font(.headline)
                 .lineLimit(2)
             Text("\(record.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(record.targetAppName)")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -119,7 +121,7 @@ private struct HistoryDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(record.createdAt.formatted(date: .complete, time: .shortened))
-                        .font(.title3.weight(.semibold))
+                        .font(.title2.weight(.semibold))
                     Text("\(record.targetAppName) · \(record.templateName) · \(record.languageIdentifier)")
                         .foregroundStyle(.secondary)
                 }

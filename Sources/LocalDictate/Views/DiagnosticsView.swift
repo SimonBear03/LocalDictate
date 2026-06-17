@@ -29,7 +29,7 @@ struct DiagnosticsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Text(model.localAPIService.status.detail)
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             .systemGroupedRowSurface()
@@ -71,12 +71,12 @@ struct DiagnosticsView: View {
                     LabeledContent("Format", value: diagnostics.formatDescription)
                     if diagnostics.isProbablySilent {
                         Text("The last capture looked silent before transcription. Check System Settings > Sound > Input and make sure the input meter moves while you speak.")
-                            .font(.caption)
+                            .font(.callout)
                             .foregroundStyle(.orange)
                     }
                     if let writeError = diagnostics.writeErrorDescription {
                         Text(writeError)
-                            .font(.caption)
+                            .font(.callout)
                             .foregroundStyle(.orange)
                     }
                 } else {
@@ -140,26 +140,26 @@ private struct SpeechTraceRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(event.decision.rawValue)
-                    .font(.caption.monospaced())
+                    .font(.footnote.monospaced())
                     .foregroundStyle(decisionTint)
                 Spacer()
                 Text("\(event.previousCharacters) -> \(event.incomingCharacters) -> \(event.outputCharacters) chars")
-                    .font(.caption.monospacedDigit())
+                    .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
             Text("windows \(Self.windowText(event.previousWindow)) | \(Self.windowText(event.incomingWindow)) | \(Self.windowText(event.outputWindow))")
-                .font(.caption2.monospaced())
+                .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
 
             if !event.incomingPreview.isEmpty {
                 Text("In: \(event.incomingPreview)")
-                    .font(.caption)
+                    .font(.footnote)
                     .lineLimit(2)
             }
             if !event.outputPreview.isEmpty {
                 Text("Out: \(event.outputPreview)")
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -207,7 +207,7 @@ private struct EngineRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(availability.detail)
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }

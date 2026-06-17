@@ -18,7 +18,7 @@ struct PrivacyView: View {
 
                 if let permissionNotice = model.permissionNotice {
                     Text(permissionNotice)
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
 
@@ -42,7 +42,7 @@ struct PrivacyView: View {
                         .textSelection(.enabled)
                 }
                 Text("Accessibility permission must be granted to this exact app copy.")
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             .systemGroupedRowSurface()

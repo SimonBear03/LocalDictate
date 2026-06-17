@@ -36,7 +36,7 @@ struct TemplatesView: View {
     }
 
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             TemplateListPane(
                 templates: filteredTemplates,
                 selectedTemplateID: effectiveSelectedTemplateID,
@@ -45,6 +45,8 @@ struct TemplatesView: View {
             ) { templateID in
                 selectedListTemplateID = templateID
             }
+
+            Divider()
 
             Group {
                 if let selectedTemplate {
@@ -58,7 +60,7 @@ struct TemplatesView: View {
                     ContentUnavailableView("No Templates", systemImage: "text.badge.star")
                 }
             }
-            .frame(minWidth: 320)
+            .frame(minWidth: 260, maxWidth: .infinity)
             .systemWindowSurface()
         }
         .systemWindowSurface()
@@ -112,7 +114,7 @@ private struct TemplateListPane: View {
             }
         }
         .listStyle(.plain)
-        .frame(minWidth: 260, idealWidth: 300, maxWidth: 360)
+        .frame(width: 235)
         .overlay {
             if templates.isEmpty {
                 ContentUnavailableView(
@@ -138,13 +140,13 @@ private struct TemplateListRow: View {
 
                 if isDefault {
                     Text("Default")
-                        .font(.caption.weight(.semibold))
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
             }
 
             Text(template.summary)
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
         }
@@ -163,14 +165,14 @@ private struct TemplateDetailView: View {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(template.name)
-                            .font(.title2.weight(.semibold))
+                            .font(.title.weight(.semibold))
                         Text(template.summary)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if isDefault {
                         Text("Default")
-                            .font(.caption.weight(.semibold))
+                            .font(.callout.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
@@ -192,7 +194,7 @@ private struct TemplateDetailView: View {
                 }
 
                 Text("Custom templates and editing are planned for a later V1 pass. The default prompt stays conservative and avoids rewriting wording.")
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             .padding(28)
