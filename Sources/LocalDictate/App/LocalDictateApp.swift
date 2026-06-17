@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 struct LocalDictateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    private static let sharedModel = LocalDictateModel()
+    static let sharedModel = LocalDictateModel()
     private let model = LocalDictateApp.sharedModel
 
     init() {
@@ -14,20 +14,13 @@ struct LocalDictateApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("A", systemImage: "text.cursor") {
-            MenuBarContentView()
-                .environmentObject(model)
-                .tint(.blue)
-                .accentColor(.blue)
-        }
-        .menuBarExtraStyle(.window)
-
         Window("LocalDictate", id: WindowID.main.rawValue) {
             MainWindowView()
                 .environmentObject(model)
                 .tint(.blue)
                 .accentColor(.blue)
                 .configuredAppWindowAppearance()
+                .background(WindowCommandInstaller())
                 .frame(minWidth: 720, minHeight: 420)
         }
         .defaultSize(width: 980, height: 660)
@@ -44,7 +37,10 @@ struct LocalDictateApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusBarController: StatusBarController?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        statusBarController = StatusBarController(model: LocalDictateApp.sharedModel)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

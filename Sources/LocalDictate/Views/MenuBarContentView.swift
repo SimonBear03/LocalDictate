@@ -2,8 +2,13 @@ import LocalDictateCore
 import SwiftUI
 
 struct MenuBarContentView: View {
-    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var model: LocalDictateModel
+    var openMainWindow: @MainActor () -> Void = {
+        WindowCommandCenter.shared.openMainWindow()
+    }
+    var openSettings: @MainActor () -> Void = {
+        WindowCommandCenter.shared.openSettings()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -33,13 +38,10 @@ struct MenuBarContentView: View {
 
             ControlGroup {
                 Button("Open") {
-                    openWindow(id: WindowID.main.rawValue)
-                    WindowFocusService.focusMainWindow()
+                    openMainWindow()
                 }
                 Button("Settings") {
-                    model.selectedSidebarSection = .settings
-                    openWindow(id: WindowID.main.rawValue)
-                    WindowFocusService.focusMainWindow()
+                    openSettings()
                 }
                 Button("Quit") {
                     NSApp.terminate(nil)

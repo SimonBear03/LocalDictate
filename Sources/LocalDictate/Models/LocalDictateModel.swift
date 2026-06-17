@@ -14,6 +14,7 @@ final class LocalDictateModel: ObservableObject {
     @Published var activeAudioURL: URL?
     @Published var lastAudioDiagnostics: AudioRecordingDiagnostics?
     @Published var lastInsertionDiagnostics: InsertionDiagnostics?
+    @Published private(set) var menuBarVisualState: MenuBarVisualState = .idle
     @Published private(set) var runtimeDiagnostics: [RuntimeTraceEvent] = []
     @Published var audioInputDevices: [AudioInputDeviceChoice] = [.systemDefault]
     @Published var selectedSidebarSection: SidebarSection? = .history
@@ -49,6 +50,8 @@ final class LocalDictateModel: ObservableObject {
     private let defaults: UserDefaults
     private var didLaunch = false
     private var didOfferAccessibilityForCurrentRecording = false
+    private var menuBarVisualGeneration = 0
+    private var menuBarVisualReturnTask: Task<Void, Never>?
 
     var selectedTemplate: CleanupTemplate {
         templateStore.template(id: selectedTemplateID)
@@ -165,6 +168,7 @@ final class LocalDictateModel: ObservableObject {
         RuntimeDiagnostics.log(scope: "Recording", message: "startRecording", details: "current=\(status)")
         latestError = nil
         didOfferAccessibilityForCurrentRecording = false
+        setMenuBarVisual(.idle, reason: "start requested")
 
         Task { @MainActor in
             let permissionSetup = await ensureRecordingPermissions()
@@ -181,6 +185,7 @@ final class LocalDictateModel: ObservableObject {
             if permissionSetup.permissionsWereRequested {
                 status = .error
                 latestError = "Permissions were updated. Press ⌘D again to start recording."
+                setMenuBarVisual(.idle, reason: "permissions updated")
                 await refreshSystemState()
                 return
             }
@@ -200,10 +205,12 @@ final class LocalDictateModel: ObservableObject {
                     self?.appendSpeechDebugEvent(event)
                 }
                 status = .listening
+                setMenuBarVisual(.recording, reason: "recording started")
             } catch {
                 RuntimeDiagnostics.log(scope: "Recording", message: "startRecording failed", details: error.localizedDescription)
                 status = .error
                 latestError = error.localizedDescription
+                setMenuBarVisual(.errorFlash, reason: "recording failed")
                 await refreshSystemState()
             }
         }
@@ -213,12 +220,14 @@ final class LocalDictateModel: ObservableObject {
         RuntimeDiagnostics.log(scope: "Recording", message: "stopRecording", details: "current=\(status)")
         guard status == .listening else { return }
         status = .transcribing
+        setMenuBarVisual(.idle, reason: "recording stopped")
         Task { @MainActor in
             do {
                 guard let recording = try await recorder.stopRecording() else {
                     RuntimeDiagnostics.log(scope: "Recording", message: "stopRecording found no active recording")
                     status = .error
                     latestError = "No active recording was found."
+                    setMenuBarVisual(.errorFlash, reason: "missing recording")
                     return
                 }
 
@@ -234,6 +243,7 @@ final class LocalDictateModel: ObservableObject {
                     RuntimeDiagnostics.log(scope: "Recording", message: "recording appears silent", details: recording.diagnostics.summary)
                     status = .error
                     latestError = "The recording appears silent (\(recording.diagnostics.summary)). Check the Mac input device and microphone level."
+                    setMenuBarVisual(.errorFlash, reason: "silent recording")
                     return
                 }
 
@@ -242,6 +252,7 @@ final class LocalDictateModel: ObservableObject {
                 RuntimeDiagnostics.log(scope: "Recording", message: "stopRecording failed", details: error.localizedDescription)
                 status = .error
                 latestError = error.localizedDescription
+                setMenuBarVisual(.errorFlash, reason: "stop failed")
                 await refreshSystemState()
             }
         }
@@ -251,6 +262,7 @@ final class LocalDictateModel: ObservableObject {
         recorder.discardActiveRecording()
         activeAudioURL = nil
         status = .idle
+        setMenuBarVisual(.idle, reason: "recording cancelled")
     }
 
     func insertLatest() {
@@ -261,6 +273,7 @@ final class LocalDictateModel: ObservableObject {
             RuntimeDiagnostics.log(scope: "Insertion", message: "insertLatest failed", details: error.localizedDescription)
             latestError = error.localizedDescription
             status = .error
+            setMenuBarVisual(.errorFlash, reason: "manual insertion failed")
         }
     }
 
@@ -268,16 +281,19 @@ final class LocalDictateModel: ObservableObject {
         RuntimeDiagnostics.log(scope: "Cleanup", message: "runSampleCleanup")
         liveTranscript = "this is a local dictate test please clean it up and make it useful"
         status = .cleaning
+        setMenuBarVisual(.cleaning, reason: "sample cleanup started")
         Task { @MainActor in
             do {
                 cleanedText = try await cleanupService.clean(text: liveTranscript, template: selectedTemplate)
                 RuntimeDiagnostics.log(scope: "Cleanup", message: "sample cleanup success")
                 status = .ready
+                setMenuBarVisual(.successFlash, reason: "sample cleanup finished")
             } catch {
                 cleanedText = ""
                 latestError = "Cleanup failed. Raw transcript is ready: \(error.localizedDescription)"
                 RuntimeDiagnostics.log(scope: "Cleanup", message: "sample cleanup failed", details: error.localizedDescription)
                 status = .ready
+                setMenuBarVisual(.errorFlash, reason: "sample cleanup failed")
             }
         }
     }
@@ -293,6 +309,7 @@ final class LocalDictateModel: ObservableObject {
         }
 
         status = .cleaning
+        setMenuBarVisual(.cleaning, reason: "cleanup started")
         var cleanupWarning: String?
         let cleaned: String
         do {
@@ -328,6 +345,7 @@ final class LocalDictateModel: ObservableObject {
             RuntimeDiagnostics.log(scope: "Insertion", message: "insertion service failed", details: error.localizedDescription)
             status = .error
             latestError = error.localizedDescription
+            setMenuBarVisual(.errorFlash, reason: "insertion failed")
         }
 
         await refreshSystemState()
@@ -342,12 +360,15 @@ final class LocalDictateModel: ObservableObject {
         case .empty:
             status = .ready
             latestError = fallbackWarning
+            setMenuBarVisual(.idle, reason: "empty insertion")
         case .copied:
             latestError = fallbackWarning
             status = .ready
+            setMenuBarVisual(.successFlash, reason: "text copied")
         case .pasted:
             latestError = fallbackWarning
             status = .inserted
+            setMenuBarVisual(.successFlash, reason: "text pasted")
         case .copiedAccessibilityMissing:
             let accessibilityState = if didOfferAccessibilityForCurrentRecording {
                 PermissionService.accessibilityState()
@@ -360,9 +381,11 @@ final class LocalDictateModel: ObservableObject {
                 "Enable Accessibility permission for automatic paste. Text is ready in LocalDictate."
             }
             status = .ready
+            setMenuBarVisual(.successFlash, reason: "copied after accessibility block")
         case .noEditableTextField:
             latestError = "No editable text field is focused. Text is ready in LocalDictate."
             status = .ready
+            setMenuBarVisual(.successFlash, reason: "text ready without focused field")
         }
     }
 
@@ -382,6 +405,7 @@ final class LocalDictateModel: ObservableObject {
         _ = requestAccessibility()
         status = .error
         latestError = "Accessibility permission updated. Press ⌘D again to start recording."
+        setMenuBarVisual(.idle, reason: "accessibility permission required")
         await refreshSystemState()
         RuntimeDiagnostics.log(scope: "Permissions", message: "auto-paste permission not granted")
         return false
@@ -401,6 +425,7 @@ final class LocalDictateModel: ObservableObject {
                 state: microphoneResult.state,
                 settingsPath: "System Settings > Privacy & Security > Microphone"
             )
+            setMenuBarVisual(.idle, reason: "microphone permission required")
             await refreshSystemState()
             return (allGranted: false, permissionsWereRequested: permissionsWereRequested)
         }
@@ -413,6 +438,7 @@ final class LocalDictateModel: ObservableObject {
                 state: speechResult.state,
                 settingsPath: "System Settings > Privacy & Security > Speech Recognition"
             )
+            setMenuBarVisual(.idle, reason: "speech permission required")
             await refreshSystemState()
             return (allGranted: false, permissionsWereRequested: permissionsWereRequested)
         }
@@ -472,6 +498,28 @@ final class LocalDictateModel: ObservableObject {
         runtimeDiagnostics.removeAll()
         Task {
             await RuntimeDiagnostics.shared.clear()
+        }
+    }
+
+    private func setMenuBarVisual(_ kind: MenuBarVisualKind, reason: String) {
+        menuBarVisualGeneration += 1
+        let nextState = MenuBarVisualState(kind: kind, generation: menuBarVisualGeneration)
+        RuntimeDiagnostics.log(
+            scope: "MenuBar",
+            message: "visual state changed",
+            details: "kind=\(kind.rawValue) generation=\(nextState.generation) reason=\(reason)"
+        )
+        menuBarVisualState = nextState
+        menuBarVisualReturnTask?.cancel()
+
+        guard let delay = kind.returnsToIdleAfterNanoseconds else { return }
+        menuBarVisualReturnTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.menuBarVisualState == nextState else { return }
+                self.setMenuBarVisual(.idle, reason: "\(kind.rawValue) completed")
+            }
         }
     }
 }
