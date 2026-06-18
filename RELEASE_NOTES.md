@@ -1,5 +1,14 @@
 # Release Notes
 
+## 2026-06-19
+
+### v1.0.1 (App Store validation prep)
+
+- Added the Xcode project, app metadata plist, icon asset catalog, and local archive/build validation scripts for Mac App Store preparation.
+- Added draft App Review notes, privacy policy copy, and App Store preparation documentation.
+- Restored standard macOS `Command-Q` behavior so quitting the app fully terminates LocalDictate, while closing the main window keeps the menu bar utility running.
+- Confirmed the App Store readiness audit passes with sandbox and microphone entitlements only.
+
 ## 2026-06-17
 
 ### V1 (Local-only, Mac-only)

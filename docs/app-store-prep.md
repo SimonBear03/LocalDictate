@@ -6,13 +6,18 @@ LocalDictate is being prepared for Mac App Store distribution. V1 remains local-
 
 - Bundle ID: `com.simonbear.localdictate`
 - Minimum macOS: `15.0`
-- Release version baseline: `1.0.0`, build `1`
+- Release version baseline: `1.0.1`, build `2`
 - Xcode project: `LocalDictate.xcodeproj`
 - Local Xcode validation: `script/build_app_store_local.sh`
 - Local archive validation: `script/archive_app_store_local.sh`
 - Lightweight compliance audit: `script/audit_app_store_readiness.sh`
 - Current signing for local validation: ad-hoc
 - Final App Store signing: blocked until paid Apple Developer Program access is available
+
+## Current Git Version
+
+- `v1.0.0`: V1 local-only status polish checkpoint.
+- `v1.0.1`: App Store validation-prep checkpoint with Xcode project, app icon asset catalog, review/privacy drafts, readiness scripts, and restored standard `Command-Q` quit behavior.
 
 ## App Store Connect Items To Prepare
 

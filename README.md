@@ -6,6 +6,7 @@ LocalDictate is a local-first voice typing app for Mac. It is designed as a nati
 
 This is the current runnable native macOS app:
 
+- Current Git version: `v1.0.1`
 - Minimum supported macOS version: macOS 15
 - Animated menu bar status item and recording controls
 - Main SwiftUI window with History, Templates, Settings, Privacy, and Diagnostics
@@ -63,7 +64,7 @@ Local validation before paid Apple Developer Program signing is available:
 ./script/archive_app_store_local.sh
 ```
 
-These scripts use ad-hoc signing only to validate the app structure locally. Final App Store upload signing requires a paid Apple Developer Program team configured in Xcode.
+These scripts use ad-hoc signing only to validate the app structure locally. Final App Store upload signing requires a paid Apple Developer Program team configured in Xcode. The current App Store-prep baseline is `1.0.1` build `2`.
 
 ## Test
 

@@ -497,7 +497,7 @@
         CODE_SIGN_IDENTITY = "-";
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
         CODE_SIGN_STYLE = Manual;
-        CURRENT_PROJECT_VERSION = 1;
+        CURRENT_PROJECT_VERSION = 2;
         DEAD_CODE_STRIPPING = YES;
         DEVELOPMENT_TEAM = "";
         ENABLE_HARDENED_RUNTIME = YES;
@@ -507,7 +507,7 @@
           "$(inherited)",
           "@executable_path/../Frameworks",
         );
-        MARKETING_VERSION = 1.0.0;
+        MARKETING_VERSION = 1.0.1;
         PRODUCT_BUNDLE_IDENTIFIER = com.simonbear.localdictate;
         PRODUCT_NAME = "$(TARGET_NAME)";
         SKIP_INSTALL = NO;
@@ -523,7 +523,7 @@
         CODE_SIGN_IDENTITY = "-";
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
         CODE_SIGN_STYLE = Manual;
-        CURRENT_PROJECT_VERSION = 1;
+        CURRENT_PROJECT_VERSION = 2;
         DEAD_CODE_STRIPPING = YES;
         DEVELOPMENT_TEAM = "";
         ENABLE_HARDENED_RUNTIME = YES;
@@ -533,7 +533,7 @@
           "$(inherited)",
           "@executable_path/../Frameworks",
         );
-        MARKETING_VERSION = 1.0.0;
+        MARKETING_VERSION = 1.0.1;
         PRODUCT_BUNDLE_IDENTIFIER = com.simonbear.localdictate;
         PRODUCT_NAME = "$(TARGET_NAME)";
         SKIP_INSTALL = NO;
