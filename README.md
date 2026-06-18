@@ -7,7 +7,7 @@ LocalDictate is a local-first voice typing app for Mac. It is designed as a nati
 This is the current runnable native macOS app:
 
 - Minimum supported macOS version: macOS 15
-- Menu bar status and recording controls
+- Animated menu bar status item and recording controls
 - Main SwiftUI window with History, Templates, Settings, Privacy, and Diagnostics
 - Native macOS sidebar, grouped forms, toolbar controls, group boxes, and menu-bar popover styling
 - Settings sidebar page for locale, insertion mode, hotkey status, audio input, and audio retention
@@ -22,6 +22,13 @@ This is the current runnable native macOS app:
 - Local history and one conservative default cleanup template
 - Conservative cleanup prompt that removes filler words, fixes punctuation/capitalization, and avoids rewriting the user's wording
 - Automatic paste by default through pasteboard plus `Cmd+V` when Accessibility is granted; otherwise text is copied
+- Dedicated menu bar visual state:
+  - idle is clear,
+  - recording breathes bright orange,
+  - cleanup breathes electric blue,
+  - success flashes green three times,
+  - real errors flash red three times.
+- Permission prompts and permission-required states do not appear as recording activity.
 - App Store-oriented sandbox entitlement and permission copy
 - `localdictate` CLI placeholder for future local API integration
 
@@ -80,3 +87,7 @@ This flow should stay stable as long as you keep using `~/Applications/LocalDict
   - recording starts only after all prompts are already granted and the user presses `⌘D` again.
 - Added explicit identity guidance for Accessibility so duplicate app copies are easier to troubleshoot.
 - Auto-paste is the default insertion mode, with full menu-bar and diagnostics visibility.
+- Menu bar animation is intentionally separate from text status. `DictationStatus`
+  describes workflow text such as `Checking Permissions`, `Permission Needed`,
+  `Listening`, `Cleaning`, `Inserting`, `Ready`, and `Inserted`; the menu bar
+  color only indicates active recording/cleanup or short success/error flashes.

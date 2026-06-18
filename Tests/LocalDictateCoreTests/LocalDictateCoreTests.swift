@@ -28,7 +28,26 @@ import Testing
 
 @Test func dictationStatusTitlesAreReadable() {
     #expect(DictationStatus.idle.title == "Idle")
+    #expect(DictationStatus.checkingPermissions.menuTitle.contains("Checking Permissions"))
+    #expect(DictationStatus.permissionNeeded.title == "Permission Needed")
+    #expect(DictationStatus.inserting.title == "Inserting")
     #expect(DictationStatus.listening.menuTitle.contains("Listening"))
+}
+
+@Test func menuBarVisualStatesSeparateLivePulsesFromMomentaryFlashes() {
+    #expect(MenuBarVisualKind.idle.returnsToIdleAfterNanoseconds == nil)
+    #expect(MenuBarVisualKind.recording.returnsToIdleAfterNanoseconds == nil)
+    #expect(MenuBarVisualKind.cleaning.returnsToIdleAfterNanoseconds == nil)
+    #expect(MenuBarVisualKind.successFlash.returnsToIdleAfterNanoseconds != nil)
+    #expect(MenuBarVisualKind.errorFlash.returnsToIdleAfterNanoseconds != nil)
+}
+
+@Test func menuBarVisualStateGenerationDistinguishesRepeatedFlashes() {
+    let first = MenuBarVisualState(kind: .successFlash, generation: 1)
+    let second = MenuBarVisualState(kind: .successFlash, generation: 2)
+
+    #expect(first != second)
+    #expect(first.kind == second.kind)
 }
 
 @Test func transcriptAccumulatorAppendsNewTimedSpeechWindows() {

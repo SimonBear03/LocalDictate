@@ -95,9 +95,12 @@ struct MenuBarContentView: View {
     private var statusDetail: String {
         switch model.status {
         case .idle: "Ready for local voice typing."
+        case .checkingPermissions: "Checking microphone, speech, and paste permissions."
+        case .permissionNeeded: "Grant the requested permission, then press the hotkey again."
         case .listening: "Recording from the selected microphone."
         case .transcribing: "Converting speech to text locally."
         case .cleaning: "Cleaning text with the selected template."
+        case .inserting: "Sending the prepared text to the target app."
         case .ready: "Text is ready."
         case .inserted: "Text was pasted into the target app."
         case .error: "Open diagnostics for details."

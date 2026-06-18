@@ -61,7 +61,10 @@ LocalDictate is a native macOS dictation app. Keep the product Mac-first for v1.
 
 ## Design Rules
 
-- Keep the app native: SwiftUI scenes, menu bar extra, semantic colors, SF Symbols, and standard macOS controls.
+- Keep the app native: SwiftUI scenes, semantic colors, SF Symbols, and standard macOS controls.
+- The menu bar indicator is an AppKit `NSStatusItem` with a SwiftUI popover, not
+  SwiftUI `MenuBarExtra`. Keep that bridge narrow; it exists so the status icon
+  can animate and change color reliably while the rest of the app remains SwiftUI.
 - Keep V1 local-only. Do not add cloud calls, analytics, or remote diagnostics without an explicit product decision.
 - Keep StickS3 integration out of this repo's product language. StickS3 Companion is only a future API client.
 - Preserve App Store readiness: sandbox on, minimal entitlements, clear privacy copy, and no private APIs.

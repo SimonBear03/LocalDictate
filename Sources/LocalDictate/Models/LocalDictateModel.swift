@@ -166,6 +166,7 @@ final class LocalDictateModel: ObservableObject {
 
     func startRecording() {
         RuntimeDiagnostics.log(scope: "Recording", message: "startRecording", details: "current=\(status)")
+        status = .checkingPermissions
         latestError = nil
         didOfferAccessibilityForCurrentRecording = false
         setMenuBarVisual(.idle, reason: "start requested")
@@ -183,7 +184,7 @@ final class LocalDictateModel: ObservableObject {
             }
 
             if permissionSetup.permissionsWereRequested {
-                status = .error
+                status = .permissionNeeded
                 latestError = "Permissions were updated. Press ⌘D again to start recording."
                 setMenuBarVisual(.idle, reason: "permissions updated")
                 await refreshSystemState()
@@ -267,6 +268,7 @@ final class LocalDictateModel: ObservableObject {
 
     func insertLatest() {
         RuntimeDiagnostics.log(scope: "Insertion", message: "insertLatest")
+        status = .inserting
         do {
             applyInsertionOutcome(try insertionService.insertOrCopy(latestText, mode: insertionMode))
         } catch {
@@ -337,6 +339,7 @@ final class LocalDictateModel: ObservableObject {
         do {
             let insertionText = DictationTextSelection.preferredText(rawTranscript: transcript.text, cleanedText: cleaned)
             RuntimeDiagnostics.log(scope: "Insertion", message: "applying insertion result")
+            status = .inserting
             applyInsertionOutcome(
                 try insertionService.insertOrCopy(insertionText, mode: insertionMode),
                 fallbackWarning: cleanupWarning
@@ -403,7 +406,7 @@ final class LocalDictateModel: ObservableObject {
 
         didOfferAccessibilityForCurrentRecording = true
         _ = requestAccessibility()
-        status = .error
+        status = .permissionNeeded
         latestError = "Accessibility permission updated. Press ⌘D again to start recording."
         setMenuBarVisual(.idle, reason: "accessibility permission required")
         await refreshSystemState()
@@ -419,7 +422,7 @@ final class LocalDictateModel: ObservableObject {
 
         guard microphoneResult.state == .granted else {
             RuntimeDiagnostics.log(scope: "Permissions", message: "microphone not granted", details: "state=\(microphoneResult.state)")
-            status = .error
+            status = .permissionNeeded
             latestError = permissionError(
                 permissionName: "Microphone",
                 state: microphoneResult.state,
@@ -432,7 +435,7 @@ final class LocalDictateModel: ObservableObject {
 
         guard speechResult.state == .granted else {
             RuntimeDiagnostics.log(scope: "Permissions", message: "speech not granted", details: "state=\(speechResult.state)")
-            status = .error
+            status = .permissionNeeded
             latestError = permissionError(
                 permissionName: "Speech Recognition",
                 state: speechResult.state,
