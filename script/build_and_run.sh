@@ -5,6 +5,8 @@ MODE="${1:-run}"
 APP_NAME="LocalDictate"
 BUNDLE_ID="com.simonbear.localdictate"
 MIN_SYSTEM_VERSION="15.0"
+MARKETING_VERSION="1.0.0"
+CURRENT_PROJECT_VERSION="1"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="${LOCALDICTATE_INSTALL_DIR:-$HOME/Applications}"
@@ -49,9 +51,9 @@ cat >"$INFO_PLIST" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$MARKETING_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$CURRENT_PROJECT_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSHumanReadableCopyright</key>

@@ -8,6 +8,15 @@ LocalDictate is a native macOS dictation app. Keep the product Mac-first for v1.
 - The run script builds with Xcode, packages `LocalDictate.app`, installs it to
   `~/Applications`, ad-hoc signs it with `LocalDictate.entitlements`, and opens
   the installed app bundle.
+- App Store preparation entrypoint: `LocalDictate.xcodeproj`.
+- App Store local validation script: `./script/build_app_store_local.sh`.
+- App Store archive validation script: `./script/archive_app_store_local.sh`.
+- App Store readiness audit script: `./script/audit_app_store_readiness.sh`.
+- The Xcode project is the release/archive source of truth. The SwiftPM package
+  remains the source of truth for tests and package-level development.
+- Until Simon has paid Apple Developer Program access configured in Xcode, the
+  Xcode project intentionally uses ad-hoc signing for local structure builds.
+  Do not describe those builds as App Store signed or upload-ready.
 - Minimum supported macOS version is macOS 15. The app uses SwiftUI
   `defaultLaunchBehavior(.presented)` so Finder/Application launches reliably
   show the main window.
@@ -39,6 +48,10 @@ LocalDictate is a native macOS dictation app. Keep the product Mac-first for v1.
   not an `LSUIElement` accessory-only app. Do not re-add `LSUIElement` or
   `NSApp.setActivationPolicy(.accessory)` unless the launch/reopen behavior is
   redesigned and verified.
+- Closing the last window must not quit LocalDictate. The menu bar status item,
+  global hotkey, and background model should keep running until the user chooses
+  Quit from the menu bar popover or presses Command-Q.
+- Command-Q must keep the normal macOS app behavior and quit LocalDictate.
 - macOS permissions such as Accessibility and Microphone attach to the exact app
   bundle identity/path. Keep using the stable `~/Applications/LocalDictate.app`
   install path to avoid duplicate app entries and repeated permission prompts.
@@ -68,6 +81,11 @@ LocalDictate is a native macOS dictation app. Keep the product Mac-first for v1.
 - Keep V1 local-only. Do not add cloud calls, analytics, or remote diagnostics without an explicit product decision.
 - Keep StickS3 integration out of this repo's product language. StickS3 Companion is only a future API client.
 - Preserve App Store readiness: sandbox on, minimal entitlements, clear privacy copy, and no private APIs.
+- Do not add private APIs, temporary sandbox exceptions, hidden network calls,
+  analytics SDKs, or undocumented automation workarounds. If a distribution
+  feature seems to need one, stop and document the App Review risk first.
+- For App Store review, Accessibility must remain user-facing and limited to
+  automatic paste of user-dictated text into the active editable field.
 - For Apple UI/API references, prefer official Markdown endpoints when the
   normal Developer pages require JavaScript:
   - HIG: `https://docs.developer.apple.com/tutorials/data/design/human-interface-guidelines/<slug>.md`

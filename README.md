@@ -9,6 +9,8 @@ This is the current runnable native macOS app:
 - Minimum supported macOS version: macOS 15
 - Animated menu bar status item and recording controls
 - Main SwiftUI window with History, Templates, Settings, Privacy, and Diagnostics
+- Closing the main window keeps LocalDictate running from the menu bar
+- `⌘Q` quits LocalDictate normally; the menu bar popover's `Quit` button also quits
 - Native macOS sidebar, grouped forms, toolbar controls, group boxes, and menu-bar popover styling
 - Settings sidebar page for locale, insertion mode, hotkey status, audio input, and audio retention
 - Audio input selection for system default or a specific microphone
@@ -30,6 +32,7 @@ This is the current runnable native macOS app:
   - real errors flash red three times.
 - Permission prompts and permission-required states do not appear as recording activity.
 - App Store-oriented sandbox entitlement and permission copy
+- Xcode project for Mac App Store preparation
 - `localdictate` CLI placeholder for future local API integration
 
 ## Build And Run
@@ -47,6 +50,20 @@ Optional modes:
 ./script/build_and_run.sh --logs
 ./script/build_and_run.sh --telemetry
 ```
+
+## App Store Preparation
+
+The release/archive path starts from `LocalDictate.xcodeproj`. The SwiftPM package remains useful for tests and package-level development, but the Xcode project owns the App Store app bundle metadata, asset catalog, entitlements, and archive structure.
+
+Local validation before paid Apple Developer Program signing is available:
+
+```bash
+./script/audit_app_store_readiness.sh
+./script/build_app_store_local.sh
+./script/archive_app_store_local.sh
+```
+
+These scripts use ad-hoc signing only to validate the app structure locally. Final App Store upload signing requires a paid Apple Developer Program team configured in Xcode.
 
 ## Test
 

@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusBarController = StatusBarController(model: LocalDictateApp.sharedModel)
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         WindowFocusService.focusMainWindow()
         return true
